@@ -11,4 +11,4 @@ ENV PORT=10000
 
 EXPOSE 10000
 
-CMD ["./gradlew", "run", "--no-daemon"]
+CMD ["java", "-jar", "build/libs/KtorService-all.jar"]

@@ -1,0 +1,8 @@
+.gradle
+build
+.idea
+data
+.git
+.gitignore
+local.properties
+*.iml
