@@ -57,8 +57,11 @@ object DatabaseFactory {
             )
         }
 
-        println("========================================")
-        println("SQLITE CONNECTED SUCCESSFULLY")
-        println("========================================")
+        println("========== DATABASE DEBUG ==========")
+        println("DATABASE_PATH ENV = ${System.getenv("DATABASE_PATH")}")
+        println("DATABASE ABSOLUTE PATH = ${databaseFile.absolutePath}")
+        println("DATABASE EXISTS = ${databaseFile.exists()}")
+        println("DATABASE SIZE = ${if (databaseFile.exists()) databaseFile.length() else 0}")
+        println("====================================")
     }
 }
