@@ -16,7 +16,9 @@ import io.ktor.server.routing.get
 import io.ktor.server.routing.post
 import java.io.File
 import io.ktor.utils.io.jvm.javaio.copyTo
-
+import io.ktor.http.ContentType
+import io.ktor.server.response.respondFile
+import io.ktor.server.response.respondText
 fun Route.viewedItemRoutes(
     repository: ViewedItemRepository
 ) {
@@ -26,8 +28,21 @@ fun Route.viewedItemRoutes(
             File("data", "recordings")
 
         if (!recordingsDir.exists()) {
-            call.respond(
-                emptyList<String>()
+            call.respondText(
+                """
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="UTF-8">
+                <title>Recordings</title>
+            </head>
+            <body>
+                <h1>Recordings</h1>
+                <p>Chưa có file ghi âm.</p>
+            </body>
+            </html>
+            """.trimIndent(),
+                ContentType.Text.Html
             )
             return@get
         }
@@ -45,16 +60,196 @@ fun Route.viewedItemRoutes(
                 ?.sortedByDescending {
                     it.lastModified()
                 }
-                ?.map {
-                    mapOf(
-                        "fileName" to it.name,
-                        "size" to it.length(),
-                        "lastModified" to it.lastModified()
-                    )
-                }
                 ?: emptyList()
 
-        call.respond(files)
+        val html = buildString {
+
+            append(
+                """
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport"
+                      content="width=device-width, initial-scale=1.0">
+
+                <title>Audio Recordings</title>
+
+                <style>
+                    body {
+                        font-family: Arial, sans-serif;
+                        margin: 30px;
+                        background: #f5f5f5;
+                    }
+
+                    h1 {
+                        margin-bottom: 20px;
+                    }
+
+                    .recording {
+                        background: white;
+                        padding: 15px;
+                        margin-bottom: 15px;
+                        border-radius: 10px;
+                        box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+                    }
+
+                    .name {
+                        font-weight: bold;
+                        margin-bottom: 8px;
+                        word-break: break-all;
+                    }
+
+                    .info {
+                        color: #666;
+                        font-size: 14px;
+                        margin-bottom: 10px;
+                    }
+
+                    audio {
+                        width: 100%;
+                    }
+
+                    .download {
+                        display: inline-block;
+                        margin-top: 10px;
+                        text-decoration: none;
+                    }
+                </style>
+            </head>
+
+            <body>
+
+            <h1>Audio Recordings</h1>
+
+            <p>
+                Tổng số file: ${files.size}
+            </p>
+            """.trimIndent()
+            )
+
+            if (files.isEmpty()) {
+
+                append(
+                    """
+                <p>Chưa có file ghi âm.</p>
+                """.trimIndent()
+                )
+
+            } else {
+
+                files.forEach { file ->
+
+                    val encodedName =
+                        java.net.URLEncoder
+                            .encode(
+                                file.name,
+                                Charsets.UTF_8
+                            )
+                            .replace("+", "%20")
+
+                    val sizeMb =
+                        "%.2f".format(
+                            file.length() / 1024.0 / 1024.0
+                        )
+
+                    append(
+                        """
+                    <div class="recording">
+
+                        <div class="name">
+                            ${file.name}
+                        </div>
+
+                        <div class="info">
+                            ${sizeMb} MB
+                        </div>
+
+                        <audio controls preload="none">
+                            <source
+                                src="/recordings/$encodedName"
+                                type="audio/mp4">
+                            Trình duyệt không hỗ trợ audio.
+                        </audio>
+
+                        <br>
+
+                        <a
+                            class="download"
+                            href="/recordings/$encodedName"
+                            download>
+                            Tải xuống
+                        </a>
+
+                    </div>
+                    """.trimIndent()
+                    )
+                }
+            }
+
+            append(
+                """
+            </body>
+            </html>
+            """.trimIndent()
+            )
+        }
+
+        call.respondText(
+            html,
+            ContentType.Text.Html
+        )
+    }
+    get("/recordings/{fileName}") {
+
+        val fileName =
+            call.parameters["fileName"]
+
+        if (fileName.isNullOrBlank()) {
+
+            call.respond(
+                HttpStatusCode.BadRequest,
+                "File name is required"
+            )
+
+            return@get
+        }
+
+        val recordingsDir =
+            File("data", "recordings")
+
+        val file =
+            File(
+                recordingsDir,
+                fileName
+            )
+
+        // Không cho truy cập ra ngoài thư mục recordings
+        if (
+            !file.canonicalPath.startsWith(
+                recordingsDir.canonicalPath
+            )
+        ) {
+
+            call.respond(
+                HttpStatusCode.Forbidden,
+                "Access denied"
+            )
+
+            return@get
+        }
+
+        if (!file.exists() || !file.isFile) {
+
+            call.respond(
+                HttpStatusCode.NotFound,
+                "File not found"
+            )
+
+            return@get
+        }
+
+        call.respondFile(file)
     }
     get("/viewed-ids") {
 
