@@ -19,9 +19,52 @@ import io.ktor.utils.io.jvm.javaio.copyTo
 import io.ktor.http.ContentType
 import io.ktor.server.response.respondFile
 import io.ktor.server.response.respondText
+import io.ktor.server.routing.delete
+import com.example.ktorservice.model.RecordingFile
+import com.example.ktorservice.model.RecordingDeleteResponse
+import io.ktor.server.routing.delete
 fun Route.viewedItemRoutes(
     repository: ViewedItemRepository
 ) {
+    get("/recordings/list") {
+
+        val recordingsDir =
+            File("data", "recordings")
+
+        if (!recordingsDir.exists()) {
+
+            call.respond(
+                emptyList<RecordingFile>()
+            )
+
+            return@get
+        }
+
+        val files =
+            recordingsDir
+                .listFiles()
+                ?.filter {
+                    it.isFile &&
+                            it.extension.equals(
+                                "m4a",
+                                ignoreCase = true
+                            )
+                }
+                ?.sortedByDescending {
+                    it.lastModified()
+                }
+                ?.map {
+
+                    RecordingFile(
+                        fileName = it.name,
+                        size = it.length(),
+                        lastModified = it.lastModified()
+                    )
+                }
+                ?: emptyList()
+
+        call.respond(files)
+    }
     get("/recordings") {
 
         val recordingsDir =
@@ -467,6 +510,161 @@ fun Route.viewedItemRoutes(
                     success = false,
                     fileName = "",
                     message = e.message ?: "Upload failed"
+                )
+            )
+        }
+    }
+    delete("/recordings/{fileName}") {
+
+        try {
+
+            val fileName =
+                call.parameters["fileName"]
+
+            if (fileName.isNullOrBlank()) {
+
+                call.respond(
+                    HttpStatusCode.BadRequest,
+                    RecordingDeleteResponse(
+                        success = false,
+                        fileName = "",
+                        message = "File name is required"
+                    )
+                )
+
+                return@delete
+            }
+
+            val recordingsDir =
+                File("data", "recordings")
+
+            if (!recordingsDir.exists()) {
+
+                call.respond(
+                    HttpStatusCode.NotFound,
+                    RecordingDeleteResponse(
+                        success = false,
+                        fileName = fileName,
+                        message = "Recordings directory not found"
+                    )
+                )
+
+                return@delete
+            }
+
+            val file =
+                File(
+                    recordingsDir,
+                    fileName
+                )
+
+            println(
+                "DELETE recording:"
+            )
+
+            println(
+                "Directory = ${recordingsDir.absolutePath}"
+            )
+
+            println(
+                "File = ${file.absolutePath}"
+            )
+
+            println(
+                "Exists = ${file.exists()}"
+            )
+
+            println(
+                "IsFile = ${file.isFile}"
+            )
+
+            if (!file.exists() || !file.isFile) {
+
+                call.respond(
+                    HttpStatusCode.NotFound,
+                    RecordingDeleteResponse(
+                        success = false,
+                        fileName = fileName,
+                        message = "File not found"
+                    )
+                )
+
+                return@delete
+            }
+
+            // Chống path traversal
+            val directoryPath =
+                recordingsDir
+                    .canonicalFile
+                    .toPath()
+
+            val filePath =
+                file
+                    .canonicalFile
+                    .toPath()
+
+            if (!filePath.startsWith(directoryPath)) {
+
+                call.respond(
+                    HttpStatusCode.Forbidden,
+                    RecordingDeleteResponse(
+                        success = false,
+                        fileName = fileName,
+                        message = "Access denied"
+                    )
+                )
+
+                return@delete
+            }
+
+            val deleted =
+                file.delete()
+
+            println(
+                "Delete result = $deleted"
+            )
+
+            if (!deleted) {
+
+                call.respond(
+                    HttpStatusCode.InternalServerError,
+                    RecordingDeleteResponse(
+                        success = false,
+                        fileName = fileName,
+                        message = "Cannot delete file"
+                    )
+                )
+
+                return@delete
+            }
+
+            call.respond(
+                HttpStatusCode.OK,
+                RecordingDeleteResponse(
+                    success = true,
+                    fileName = fileName,
+                    message = "Recording deleted"
+                )
+            )
+
+        } catch (e: Exception) {
+
+            println(
+                "========== DELETE RECORDING ERROR =========="
+            )
+
+            e.printStackTrace()
+
+            call.respond(
+                HttpStatusCode.InternalServerError,
+                RecordingDeleteResponse(
+                    success = false,
+                    fileName =
+                        call.parameters["fileName"]
+                            ?: "",
+                    message =
+                        e.message
+                            ?: "Delete failed"
                 )
             )
         }
