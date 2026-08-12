@@ -20,7 +20,42 @@ import io.ktor.utils.io.jvm.javaio.copyTo
 fun Route.viewedItemRoutes(
     repository: ViewedItemRepository
 ) {
+    get("/recordings") {
 
+        val recordingsDir =
+            File("data", "recordings")
+
+        if (!recordingsDir.exists()) {
+            call.respond(
+                emptyList<String>()
+            )
+            return@get
+        }
+
+        val files =
+            recordingsDir
+                .listFiles()
+                ?.filter {
+                    it.isFile &&
+                            it.extension.equals(
+                                "m4a",
+                                ignoreCase = true
+                            )
+                }
+                ?.sortedByDescending {
+                    it.lastModified()
+                }
+                ?.map {
+                    mapOf(
+                        "fileName" to it.name,
+                        "size" to it.length(),
+                        "lastModified" to it.lastModified()
+                    )
+                }
+                ?: emptyList()
+
+        call.respond(files)
+    }
     get("/viewed-ids") {
 
         val ids =
