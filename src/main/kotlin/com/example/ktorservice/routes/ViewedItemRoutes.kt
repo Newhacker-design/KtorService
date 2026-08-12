@@ -1,14 +1,21 @@
+
 package com.example.ktorservice.routes
 
+import com.example.ktorservice.model.RecordingUploadResponse
 import com.example.ktorservice.model.ViewedIdsBatchRequest
 import com.example.ktorservice.model.ViewedIdsBatchResponse
 import com.example.ktorservice.repository.ViewedItemRepository
 import io.ktor.http.HttpStatusCode
+import io.ktor.http.content.PartData
+import io.ktor.http.content.forEachPart
 import io.ktor.server.request.receive
+import io.ktor.server.request.receiveMultipart
 import io.ktor.server.response.respond
 import io.ktor.server.routing.Route
 import io.ktor.server.routing.get
 import io.ktor.server.routing.post
+import java.io.File
+import io.ktor.utils.io.jvm.javaio.copyTo
 
 fun Route.viewedItemRoutes(
     repository: ViewedItemRepository
@@ -16,14 +23,16 @@ fun Route.viewedItemRoutes(
 
     get("/viewed-ids") {
 
-        val ids = repository.getAllIds()
+        val ids =
+            repository.getAllIds()
 
         call.respond(ids)
     }
 
     get("/viewed-hashes") {
 
-        val hashes = repository.getAllHashes()
+        val hashes =
+            repository.getAllHashes()
 
         call.respond(hashes)
     }
@@ -32,7 +41,8 @@ fun Route.viewedItemRoutes(
 
         try {
 
-            val id = call.receive<Long>()
+            val id =
+                call.receive<Long>()
 
             repository.insertId(id)
 
@@ -54,7 +64,8 @@ fun Route.viewedItemRoutes(
 
         try {
 
-            val hash = call.receive<String>()
+            val hash =
+                call.receive<String>()
 
             repository.insertHash(hash)
 
@@ -72,21 +83,28 @@ fun Route.viewedItemRoutes(
         }
     }
 
-
     post("/viewed-ids/batch") {
 
-        println("========== POST /viewed-ids/batch ==========")
+        println(
+            "========== POST /viewed-ids/batch =========="
+        )
 
         try {
 
-            val request = call.receive<ViewedIdsBatchRequest>()
+            val request =
+                call.receive<ViewedIdsBatchRequest>()
 
-            println("Received IDs: ${request.ids}")
-            println("Start insertIds...")
+            println(
+                "Received IDs: ${request.ids}"
+            )
 
-            repository.insertIds(request.ids)
+            repository.insertIds(
+                request.ids
+            )
 
-            println("insertIds completed successfully")
+            println(
+                "insertIds completed successfully"
+            )
 
             call.respond(
                 HttpStatusCode.OK,
@@ -99,9 +117,17 @@ fun Route.viewedItemRoutes(
 
         } catch (e: Exception) {
 
-            println("========== BATCH ERROR ==========")
-            println("Exception: ${e::class.qualifiedName}")
-            println("Message: ${e.message}")
+            println(
+                "========== BATCH ERROR =========="
+            )
+
+            println(
+                "Exception: ${e::class.qualifiedName}"
+            )
+
+            println(
+                "Message: ${e.message}"
+            )
 
             e.printStackTrace()
 
@@ -110,12 +136,110 @@ fun Route.viewedItemRoutes(
                 ViewedIdsBatchResponse(
                     success = false,
                     count = 0,
-                    message = e.message ?: "Unknown error"
+                    message =
+                        e.message
+                            ?: "Unknown error"
                 )
             )
         }
     }
 
+    /**
+     * Upload file ghi âm.
+     *
+     * POST /recordings/upload
+     */
+    post("/recordings/upload") {
 
+        try {
 
+            val multipart =
+                call.receiveMultipart()
+
+            var savedFile: File? = null
+
+            multipart.forEachPart { part ->
+
+                if (part is PartData.FileItem) {
+
+                    val originalName =
+                        part.originalFileName
+                            ?: "recording_${System.currentTimeMillis()}.m4a"
+
+                    val recordingsDir =
+                        File("data", "recordings")
+
+                    if (!recordingsDir.exists()) {
+                        recordingsDir.mkdirs()
+                    }
+
+                    val file =
+                        File(
+                            recordingsDir,
+                            originalName
+                        )
+
+                    val input = part.provider()
+
+                    file.outputStream().use { output ->
+                        input.copyTo(output)
+                    }
+
+                    savedFile = file
+
+                    println(
+                        "Recording saved: ${file.absolutePath}"
+                    )
+
+                    println(
+                        "File size: ${file.length()} bytes"
+                    )
+                }
+
+                part.dispose()
+            }
+
+            val file =
+                savedFile
+                    ?: run {
+
+                        call.respond(
+                            HttpStatusCode.BadRequest,
+                            mapOf(
+                                "success" to false,
+                                "message" to "No file uploaded"
+                            )
+                        )
+
+                        return@post
+                    }
+
+            call.respond(
+                HttpStatusCode.OK,
+                RecordingUploadResponse(
+                    success = true,
+                    fileName = savedFile!!.name,
+                    message = "Recording uploaded successfully"
+                )
+            )
+
+        } catch (e: Exception) {
+
+            println(
+                "UPLOAD RECORDING ERROR: ${e.message}"
+            )
+
+            e.printStackTrace()
+
+            call.respond(
+                HttpStatusCode.InternalServerError,
+                RecordingUploadResponse(
+                    success = false,
+                    fileName = "",
+                    message = e.message ?: "Upload failed"
+                )
+            )
+        }
+    }
 }
+

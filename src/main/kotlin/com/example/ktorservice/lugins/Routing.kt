@@ -10,9 +10,10 @@ import io.ktor.server.routing.routing
 
 fun Application.configureRouting() {
 
-    val viewedItemRepository = ViewedItemRepository(
-        ViewedItemDaoImpl()
-    )
+    val viewedItemRepository =
+        ViewedItemRepository(
+            ViewedItemDaoImpl()
+        )
 
     routing {
 
@@ -20,6 +21,8 @@ fun Application.configureRouting() {
             call.respondText("Ktor Server is running")
         }
 
-        viewedItemRoutes(viewedItemRepository)
+        viewedItemRoutes(
+            viewedItemRepository
+        )
     }
 }
