@@ -1,6 +1,7 @@
 
 package com.example.ktorservice.routes
 
+import com.example.ktorservice.model.LatestRecording
 import com.example.ktorservice.model.RecordingUploadResponse
 import com.example.ktorservice.model.ViewedIdsBatchRequest
 import com.example.ktorservice.model.ViewedIdsBatchResponse
@@ -26,6 +27,62 @@ import io.ktor.server.routing.delete
 fun Route.viewedItemRoutes(
     repository: ViewedItemRepository
 ) {
+    get("/recordings/latest") {
+
+        val recordingsDir =
+            File("data", "recordings")
+
+        if (!recordingsDir.exists()) {
+
+            call.respond(
+                HttpStatusCode.NotFound,
+                "Không tìm thấy thư mục recordings"
+            )
+
+            return@get
+        }
+
+        val latestFile =
+            recordingsDir
+                .listFiles()
+                ?.filter {
+
+                    it.isFile &&
+                            it.extension.equals(
+                                "m4a",
+                                ignoreCase = true
+                            )
+                }
+                ?.maxByOrNull {
+
+                    it.lastModified()
+                }
+
+        if (latestFile == null) {
+
+            call.respond(
+                HttpStatusCode.NotFound,
+                "Không có file ghi âm"
+            )
+
+            return@get
+        }
+
+        call.respond(
+
+            LatestRecording(
+
+                name =
+                    latestFile.name,
+
+                size =
+                    latestFile.length(),
+
+                lastModified =
+                    latestFile.lastModified()
+            )
+        )
+    }
     get("/recordings/list") {
 
         val recordingsDir =
@@ -431,42 +488,78 @@ fun Route.viewedItemRoutes(
 
             var savedFile: File? = null
 
+            var deviceName =
+                "Unknown"
+
             multipart.forEachPart { part ->
 
-                if (part is PartData.FileItem) {
+                when (part) {
 
-                    val originalName =
-                        part.originalFileName
-                            ?: "recording_${System.currentTimeMillis()}.m4a"
+                    is PartData.FormItem -> {
 
-                    val recordingsDir =
-                        File("data", "recordings")
+                        if (part.name == "deviceName") {
 
-                    if (!recordingsDir.exists()) {
-                        recordingsDir.mkdirs()
+                            deviceName =
+                                part.value
+                                    .replace("\\", "_")
+                                    .replace("/", "_")
+                                    .replace(":", "_")
+                                    .replace("*", "_")
+                                    .replace("?", "_")
+                                    .replace("\"", "_")
+                                    .replace("<", "_")
+                                    .replace(">", "_")
+                                    .replace("|", "_")
+                        }
                     }
 
-                    val file =
-                        File(
-                            recordingsDir,
-                            originalName
+                    is PartData.FileItem -> {
+
+                        val originalName =
+                            part.originalFileName
+                                ?: "recording_${System.currentTimeMillis()}.m4a"
+
+                        val recordingsDir =
+                            File(
+                                "data",
+                                "recordings"
+                            )
+
+                        if (!recordingsDir.exists()) {
+
+                            recordingsDir.mkdirs()
+                        }
+
+                        val file =
+                            File(
+                                recordingsDir,
+                                "${deviceName}_$originalName"
+                            )
+
+                        val input =
+                            part.provider()
+
+                        file.outputStream().use { output ->
+
+                            input.copyTo(output)
+                        }
+
+                        savedFile = file
+
+                        println(
+                            "Recording saved: ${file.absolutePath}"
                         )
 
-                    val input = part.provider()
+                        println(
+                            "Device: $deviceName"
+                        )
 
-                    file.outputStream().use { output ->
-                        input.copyTo(output)
+                        println(
+                            "File size: ${file.length()} bytes"
+                        )
                     }
 
-                    savedFile = file
-
-                    println(
-                        "Recording saved: ${file.absolutePath}"
-                    )
-
-                    println(
-                        "File size: ${file.length()} bytes"
-                    )
+                    else -> {}
                 }
 
                 part.dispose()
@@ -491,7 +584,7 @@ fun Route.viewedItemRoutes(
                 HttpStatusCode.OK,
                 RecordingUploadResponse(
                     success = true,
-                    fileName = savedFile!!.name,
+                    fileName = file.name,
                     message = "Recording uploaded successfully"
                 )
             )
@@ -509,7 +602,9 @@ fun Route.viewedItemRoutes(
                 RecordingUploadResponse(
                     success = false,
                     fileName = "",
-                    message = e.message ?: "Upload failed"
+                    message =
+                        e.message
+                            ?: "Upload failed"
                 )
             )
         }
