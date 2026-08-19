@@ -4,6 +4,8 @@ package com.example.ktorservice.routes
 import com.example.ktorservice.model.CallEventRequest
 import com.example.ktorservice.model.CallEventResponse
 import com.example.ktorservice.model.LatestRecording
+import com.example.ktorservice.model.LocationRequest
+import com.example.ktorservice.model.LocationResponse
 import com.example.ktorservice.model.RecordingUploadResponse
 import com.example.ktorservice.model.ViewedIdsBatchRequest
 import com.example.ktorservice.model.ViewedIdsBatchResponse
@@ -30,6 +32,7 @@ fun Route.viewedItemRoutes(
     repository: ViewedItemRepository
 ) {
     val callEvents = mutableListOf<CallEventRequest>()
+    val locations = mutableListOf<LocationRequest>()
     get("/recordings/latest") {
 
         val recordingsDir =
@@ -457,6 +460,170 @@ fun Route.viewedItemRoutes(
             )
         }
     }
+
+    post("/location") {
+
+        println(
+            "========== POST /location HIT =========="
+        )
+
+        try {
+
+            val request =
+                call.receive<LocationRequest>()
+
+            println(
+                "📍 LOCATION" +
+                        "\ndeviceName = ${request.deviceName}" +
+                        "\nlatitude = ${request.latitude}" +
+                        "\nlongitude = ${request.longitude}" +
+                        "\ntimestamp = ${request.timestamp}"
+            )
+
+            locations.add(request)
+
+            call.respond(
+                HttpStatusCode.OK,
+                LocationResponse(
+                    success = true,
+                    message = "Location received",
+                    deviceName = request.deviceName,
+                    latitude = request.latitude,
+                    longitude = request.longitude,
+                    timestamp = request.timestamp
+                )
+            )
+
+        } catch (e: Exception) {
+
+            println(
+                "========== LOCATION ERROR =========="
+            )
+
+            println(
+                "Exception = ${e::class.qualifiedName}"
+            )
+
+            println(
+                "Message = ${e.message}"
+            )
+
+            e.printStackTrace()
+
+            call.respond(
+                HttpStatusCode.InternalServerError,
+                LocationResponse(
+                    success = false,
+                    message =
+                        e.message
+                            ?: "Unknown error"
+                )
+            )
+        }
+    }
+    get("/location") {
+
+        val html =
+            buildString {
+
+                appendLine("<html>")
+                appendLine("<head>")
+
+                appendLine(
+                    "<meta charset=\"UTF-8\">"
+                )
+
+                appendLine(
+                    "<meta name=\"viewport\" " +
+                            "content=\"width=device-width, initial-scale=1.0\">"
+                )
+
+                appendLine(
+                    "<title>Locations</title>"
+                )
+
+                appendLine("</head>")
+
+                appendLine("<body>")
+
+                appendLine(
+                    "<h1>Location History</h1>"
+                )
+
+                appendLine(
+                    "<p>Total locations: ${locations.size}</p>"
+                )
+
+                if (locations.isEmpty()) {
+
+                    appendLine(
+                        "<p>Chưa có location nào.</p>"
+                    )
+
+                } else {
+
+                    appendLine(
+                        "<table border=\"1\" cellpadding=\"8\" cellspacing=\"0\">"
+                    )
+
+                    appendLine("<tr>")
+
+                    appendLine(
+                        "<th>Device</th>"
+                    )
+
+                    appendLine(
+                        "<th>Latitude</th>"
+                    )
+
+                    appendLine(
+                        "<th>Longitude</th>"
+                    )
+
+                    appendLine(
+                        "<th>Timestamp</th>"
+                    )
+
+                    appendLine("</tr>")
+
+                    locations
+                        .asReversed()
+                        .forEach { location ->
+
+                            appendLine("<tr>")
+
+                            appendLine(
+                                "<td>${location.deviceName}</td>"
+                            )
+
+                            appendLine(
+                                "<td>${location.latitude}</td>"
+                            )
+
+                            appendLine(
+                                "<td>${location.longitude}</td>"
+                            )
+
+                            appendLine(
+                                "<td>${location.timestamp}</td>"
+                            )
+
+                            appendLine("</tr>")
+                        }
+
+                    appendLine("</table>")
+                }
+
+                appendLine("</body>")
+                appendLine("</html>")
+            }
+
+        call.respondText(
+            html,
+            ContentType.Text.Html
+        )
+    }
+
 
     get("/viewed-hashes") {
 
