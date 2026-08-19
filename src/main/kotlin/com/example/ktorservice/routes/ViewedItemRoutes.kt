@@ -571,13 +571,29 @@ fun Route.viewedItemRoutes(
 
         try {
 
-            val rawBody = call.receiveText()
+            val request =
+                call.receive<LocationRequest>()
 
-            println("RAW BODY = $rawBody")
+            println(
+                "📍 LOCATION" +
+                        "\ndeviceName = ${request.deviceName}" +
+                        "\nlatitude = ${request.latitude}" +
+                        "\nlongitude = ${request.longitude}" +
+                        "\ntimestamp = ${request.timestamp}"
+            )
+
+            locations.add(request)
 
             call.respond(
                 HttpStatusCode.OK,
-                rawBody
+                LocationResponse(
+                    success = true,
+                    message = "Location received",
+                    deviceName = request.deviceName,
+                    latitude = request.latitude,
+                    longitude = request.longitude,
+                    timestamp = request.timestamp
+                )
             )
 
         } catch (e: Exception) {
@@ -590,7 +606,12 @@ fun Route.viewedItemRoutes(
 
             call.respond(
                 HttpStatusCode.InternalServerError,
-                "ERROR: ${e.message}"
+                LocationResponse(
+                    success = false,
+                    message =
+                        e.message
+                            ?: "Unknown error"
+                )
             )
         }
     }
