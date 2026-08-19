@@ -1,6 +1,7 @@
 
 package com.example.ktorservice.routes
 
+import com.example.ktorservice.model.CallEventRequest
 import com.example.ktorservice.model.LatestRecording
 import com.example.ktorservice.model.RecordingUploadResponse
 import com.example.ktorservice.model.ViewedIdsBatchRequest
@@ -760,6 +761,45 @@ fun Route.viewedItemRoutes(
                     message =
                         e.message
                             ?: "Delete failed"
+                )
+            )
+        }
+    }
+
+    post("/call-events") {
+
+        try {
+
+            val request =
+                call.receive<CallEventRequest>()
+
+            println(
+                "📞 CALL EVENT" +
+                        "\ndeviceName = ${request.deviceName}" +
+                        "\nevent = ${request.event}" +
+                        "\ntimestamp = ${request.timestamp}"
+            )
+
+            call.respond(
+                HttpStatusCode.OK,
+                mapOf(
+                    "success" to true,
+                    "message" to "Call event received"
+                )
+            )
+
+        } catch (e: Exception) {
+
+            e.printStackTrace()
+
+            call.respond(
+                HttpStatusCode.InternalServerError,
+                mapOf(
+                    "success" to false,
+                    "message" to (
+                            e.message
+                                ?: "Unknown error"
+                            )
                 )
             )
         }
