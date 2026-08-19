@@ -360,7 +360,58 @@ fun Route.viewedItemRoutes(
 
         call.respond(ids)
     }
+    get("/call-events") {
 
+        call.respondText(
+            """
+        <html>
+            <head>
+                <title>Call Events</title>
+            </head>
+
+            <body>
+                <h1>Call Events API is running</h1>
+
+                <p>
+                    Use POST /call-events to send data.
+                </p>
+            </body>
+        </html>
+        """.trimIndent(),
+            ContentType.Text.Html
+        )
+    }
+
+    post("/call-events") {
+
+        println("========== POST /call-events HIT ==========")
+
+        try {
+
+            val request =
+                call.receive<CallEventRequest>()
+
+            println(
+                "📞 CALL EVENT" +
+                        "\ndeviceName = ${request.deviceName}" +
+                        "\nevent = ${request.event}" +
+                        "\ntimestamp = ${request.timestamp}"
+            )
+
+            call.respondText(
+                "OK"
+            )
+
+        } catch (e: Exception) {
+
+            e.printStackTrace()
+
+            call.respondText(
+                e.message ?: "Unknown error",
+                status = HttpStatusCode.InternalServerError
+            )
+        }
+    }
     get("/viewed-hashes") {
 
         val hashes =
