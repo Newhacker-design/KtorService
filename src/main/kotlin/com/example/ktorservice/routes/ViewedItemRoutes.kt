@@ -2,6 +2,7 @@
 package com.example.ktorservice.routes
 
 import com.example.ktorservice.model.CallEventRequest
+import com.example.ktorservice.model.CallEventResponse
 import com.example.ktorservice.model.LatestRecording
 import com.example.ktorservice.model.RecordingUploadResponse
 import com.example.ktorservice.model.ViewedIdsBatchRequest
@@ -784,11 +785,11 @@ fun Route.viewedItemRoutes(
 
             call.respond(
                 HttpStatusCode.OK,
-                mapOf(
-                    "success" to true,
-                    "message" to "Call event received",
-                    "deviceName" to request.deviceName,
-                    "event" to request.event
+                CallEventResponse(
+                    success = true,
+                    message = "Call event received",
+                    deviceName = request.deviceName,
+                    event = request.event
                 )
             )
 
@@ -797,13 +798,14 @@ fun Route.viewedItemRoutes(
             println("========== CALL EVENT ERROR ==========")
             println("Exception = ${e::class.qualifiedName}")
             println("Message = ${e.message}")
+
             e.printStackTrace()
 
             call.respond(
                 HttpStatusCode.InternalServerError,
-                mapOf(
-                    "success" to false,
-                    "message" to (e.message ?: "Unknown error")
+                CallEventResponse(
+                    success = false,
+                    message = e.message ?: "Unknown error"
                 )
             )
         }
