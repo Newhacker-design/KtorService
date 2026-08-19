@@ -27,6 +27,7 @@ import io.ktor.server.response.respondText
 import io.ktor.server.routing.delete
 import com.example.ktorservice.model.RecordingFile
 import com.example.ktorservice.model.RecordingDeleteResponse
+import io.ktor.server.request.receiveText
 import io.ktor.server.routing.delete
 fun Route.viewedItemRoutes(
     repository: ViewedItemRepository
@@ -461,66 +462,7 @@ fun Route.viewedItemRoutes(
         }
     }
 
-    post("/location") {
 
-        println(
-            "========== POST /location HIT =========="
-        )
-
-        try {
-
-            val request =
-                call.receive<LocationRequest>()
-
-            println(
-                "📍 LOCATION" +
-                        "\ndeviceName = ${request.deviceName}" +
-                        "\nlatitude = ${request.latitude}" +
-                        "\nlongitude = ${request.longitude}" +
-                        "\ntimestamp = ${request.timestamp}"
-            )
-
-            locations.add(request)
-
-            call.respond(
-                HttpStatusCode.OK,
-                LocationResponse(
-                    success = true,
-                    message = "Location received",
-                    deviceName = request.deviceName,
-                    latitude = request.latitude,
-                    longitude = request.longitude,
-                    timestamp = request.timestamp
-                )
-            )
-
-        } catch (e: Exception) {
-
-            println(
-                "========== LOCATION ERROR =========="
-            )
-
-            println(
-                "Exception = ${e::class.qualifiedName}"
-            )
-
-            println(
-                "Message = ${e.message}"
-            )
-
-            e.printStackTrace()
-
-            call.respond(
-                HttpStatusCode.InternalServerError,
-                LocationResponse(
-                    success = false,
-                    message =
-                        e.message
-                            ?: "Unknown error"
-                )
-            )
-        }
-    }
     get("/location") {
 
         val html =
@@ -623,7 +565,35 @@ fun Route.viewedItemRoutes(
             ContentType.Text.Html
         )
     }
+    post("/location") {
 
+        println("========== POST /location HIT ==========")
+
+        try {
+
+            val rawBody = call.receiveText()
+
+            println("RAW BODY = $rawBody")
+
+            call.respond(
+                HttpStatusCode.OK,
+                rawBody
+            )
+
+        } catch (e: Exception) {
+
+            println("========== LOCATION ERROR ==========")
+            println("Exception = ${e::class.qualifiedName}")
+            println("Message = ${e.message}")
+
+            e.printStackTrace()
+
+            call.respond(
+                HttpStatusCode.InternalServerError,
+                "ERROR: ${e.message}"
+            )
+        }
+    }
 
     get("/viewed-hashes") {
 
