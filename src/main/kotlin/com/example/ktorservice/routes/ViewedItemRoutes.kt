@@ -29,6 +29,7 @@ import io.ktor.server.routing.delete
 fun Route.viewedItemRoutes(
     repository: ViewedItemRepository
 ) {
+    val callEvents = mutableListOf<CallEventRequest>()
     get("/recordings/latest") {
 
         val recordingsDir =
@@ -360,24 +361,54 @@ fun Route.viewedItemRoutes(
 
         call.respond(ids)
     }
+
     get("/call-events") {
 
+        val html = buildString {
+
+            appendLine("<html>")
+            appendLine("<head>")
+            appendLine("<meta charset=\"UTF-8\">")
+            appendLine("<title>Call Events</title>")
+            appendLine("</head>")
+            appendLine("<body>")
+
+            appendLine("<h1>Call Events</h1>")
+
+            if (callEvents.isEmpty()) {
+
+                appendLine("<p>Chưa có call event nào.</p>")
+
+            } else {
+
+                appendLine("<table border=\"1\" cellpadding=\"8\">")
+
+                appendLine("<tr>")
+                appendLine("<th>Device</th>")
+                appendLine("<th>Event</th>")
+                appendLine("<th>Timestamp</th>")
+                appendLine("</tr>")
+
+                callEvents.forEach { event ->
+
+                    appendLine("<tr>")
+
+                    appendLine("<td>${event.deviceName}</td>")
+                    appendLine("<td>${event.event}</td>")
+                    appendLine("<td>${event.timestamp}</td>")
+
+                    appendLine("</tr>")
+                }
+
+                appendLine("</table>")
+            }
+
+            appendLine("</body>")
+            appendLine("</html>")
+        }
+
         call.respondText(
-            """
-        <html>
-            <head>
-                <title>Call Events</title>
-            </head>
-
-            <body>
-                <h1>Call Events API is running</h1>
-
-                <p>
-                    Use POST /call-events to send data.
-                </p>
-            </body>
-        </html>
-        """.trimIndent(),
+            html,
             ContentType.Text.Html
         )
     }
@@ -388,8 +419,7 @@ fun Route.viewedItemRoutes(
 
         try {
 
-            val request =
-                call.receive<CallEventRequest>()
+            val request = call.receive<CallEventRequest>()
 
             println(
                 "📞 CALL EVENT" +
@@ -398,20 +428,36 @@ fun Route.viewedItemRoutes(
                         "\ntimestamp = ${request.timestamp}"
             )
 
-            call.respondText(
-                "OK"
+            callEvents.add(request)
+
+            call.respond(
+                HttpStatusCode.OK,
+                CallEventResponse(
+                    success = true,
+                    message = "Call event received",
+                    deviceName = request.deviceName,
+                    event = request.event
+                )
             )
 
         } catch (e: Exception) {
 
+            println("========== CALL EVENT ERROR ==========")
+            println("Exception = ${e::class.qualifiedName}")
+            println("Message = ${e.message}")
+
             e.printStackTrace()
 
-            call.respondText(
-                e.message ?: "Unknown error",
-                status = HttpStatusCode.InternalServerError
+            call.respond(
+                HttpStatusCode.InternalServerError,
+                CallEventResponse(
+                    success = false,
+                    message = e.message ?: "Unknown error"
+                )
             )
         }
     }
+
     get("/viewed-hashes") {
 
         val hashes =
@@ -818,48 +864,6 @@ fun Route.viewedItemRoutes(
         }
     }
 
-    post("/call-events") {
 
-        println("========== POST /call-events HIT ==========")
-
-        try {
-
-            val request =
-                call.receive<CallEventRequest>()
-
-            println(
-                "📞 CALL EVENT" +
-                        "\ndeviceName = ${request.deviceName}" +
-                        "\nevent = ${request.event}" +
-                        "\ntimestamp = ${request.timestamp}"
-            )
-
-            call.respond(
-                HttpStatusCode.OK,
-                CallEventResponse(
-                    success = true,
-                    message = "Call event received",
-                    deviceName = request.deviceName,
-                    event = request.event
-                )
-            )
-
-        } catch (e: Exception) {
-
-            println("========== CALL EVENT ERROR ==========")
-            println("Exception = ${e::class.qualifiedName}")
-            println("Message = ${e.message}")
-
-            e.printStackTrace()
-
-            call.respond(
-                HttpStatusCode.InternalServerError,
-                CallEventResponse(
-                    success = false,
-                    message = e.message ?: "Unknown error"
-                )
-            )
-        }
-    }
 }
 
