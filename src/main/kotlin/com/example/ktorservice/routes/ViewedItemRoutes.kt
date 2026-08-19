@@ -768,6 +768,8 @@ fun Route.viewedItemRoutes(
 
     post("/call-events") {
 
+        println("========== POST /call-events HIT ==========")
+
         try {
 
             val request =
@@ -784,22 +786,24 @@ fun Route.viewedItemRoutes(
                 HttpStatusCode.OK,
                 mapOf(
                     "success" to true,
-                    "message" to "Call event received"
+                    "message" to "Call event received",
+                    "deviceName" to request.deviceName,
+                    "event" to request.event
                 )
             )
 
         } catch (e: Exception) {
 
+            println("========== CALL EVENT ERROR ==========")
+            println("Exception = ${e::class.qualifiedName}")
+            println("Message = ${e.message}")
             e.printStackTrace()
 
             call.respond(
                 HttpStatusCode.InternalServerError,
                 mapOf(
                     "success" to false,
-                    "message" to (
-                            e.message
-                                ?: "Unknown error"
-                            )
+                    "message" to (e.message ?: "Unknown error")
                 )
             )
         }
