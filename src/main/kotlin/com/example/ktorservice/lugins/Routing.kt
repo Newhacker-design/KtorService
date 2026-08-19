@@ -1,6 +1,7 @@
 package com.example.ktorservice.plugins
 
 import com.example.ktorservice.database.dao.ViewedItemDaoImpl
+import com.example.ktorservice.repository.LocationRepository
 import com.example.ktorservice.repository.ViewedItemRepository
 import com.example.ktorservice.routes.viewedItemRoutes
 import io.ktor.server.application.Application
@@ -22,7 +23,8 @@ fun Application.configureRouting() {
         }
 
         viewedItemRoutes(
-            viewedItemRepository
+            viewedItemRepository,
+            locationRepository = LocationRepository()
         )
     }
 }

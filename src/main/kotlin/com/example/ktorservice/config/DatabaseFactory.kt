@@ -1,5 +1,6 @@
 package com.example.ktorservice.config
 
+import com.example.ktorservice.database.table.LocationTable
 import com.example.ktorservice.database.table.ViewedItems
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
@@ -53,7 +54,8 @@ object DatabaseFactory {
         transaction {
 
             SchemaUtils.create(
-                ViewedItems
+                ViewedItems,
+                LocationTable
             )
         }
 

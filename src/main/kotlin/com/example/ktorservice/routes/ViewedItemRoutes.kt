@@ -27,13 +27,15 @@ import io.ktor.server.response.respondText
 import io.ktor.server.routing.delete
 import com.example.ktorservice.model.RecordingFile
 import com.example.ktorservice.model.RecordingDeleteResponse
-import io.ktor.server.request.receiveText
-import io.ktor.server.routing.delete
+import com.example.ktorservice.repository.LocationRepository
+
+private const val MAX_LOCATIONS = 50
 fun Route.viewedItemRoutes(
-    repository: ViewedItemRepository
+    repository: ViewedItemRepository,
+    locationRepository: LocationRepository
 ) {
     val callEvents = mutableListOf<CallEventRequest>()
-    val locations = mutableListOf<LocationRequest>()
+
     get("/recordings/latest") {
 
         val recordingsDir =
@@ -465,6 +467,9 @@ fun Route.viewedItemRoutes(
 
     get("/location") {
 
+        val locations =
+            locationRepository.getAll()
+
         val html =
             buildString {
 
@@ -526,32 +531,46 @@ fun Route.viewedItemRoutes(
                         "<th>Timestamp</th>"
                     )
 
+                    appendLine(
+                        "<th>Google Maps</th>"
+                    )
+
                     appendLine("</tr>")
 
-                    locations
-                        .asReversed()
-                        .forEach { location ->
+                    locations.forEach { location ->
 
-                            appendLine("<tr>")
+                        val mapsUrl =
+                            "https://www.google.com/maps/search/?api=1&query=" +
+                                    "${location.latitude},${location.longitude}"
 
-                            appendLine(
-                                "<td>${location.deviceName}</td>"
-                            )
+                        appendLine("<tr>")
 
-                            appendLine(
-                                "<td>${location.latitude}</td>"
-                            )
+                        appendLine(
+                            "<td>${location.deviceName}</td>"
+                        )
 
-                            appendLine(
-                                "<td>${location.longitude}</td>"
-                            )
+                        appendLine(
+                            "<td>${location.latitude}</td>"
+                        )
 
-                            appendLine(
-                                "<td>${location.timestamp}</td>"
-                            )
+                        appendLine(
+                            "<td>${location.longitude}</td>"
+                        )
 
-                            appendLine("</tr>")
-                        }
+                        appendLine(
+                            "<td>${location.timestamp}</td>"
+                        )
+
+                        appendLine(
+                            "<td>" +
+                                    "<a href=\"$mapsUrl\" target=\"_blank\">" +
+                                    "Xem bản đồ" +
+                                    "</a>" +
+                                    "</td>"
+                        )
+
+                        appendLine("</tr>")
+                    }
 
                     appendLine("</table>")
                 }
@@ -567,22 +586,24 @@ fun Route.viewedItemRoutes(
     }
     post("/location") {
 
-        println("========== POST /location HIT ==========")
-
         try {
 
             val request =
                 call.receive<LocationRequest>()
 
             println(
-                "📍 LOCATION" +
-                        "\ndeviceName = ${request.deviceName}" +
-                        "\nlatitude = ${request.latitude}" +
-                        "\nlongitude = ${request.longitude}" +
-                        "\ntimestamp = ${request.timestamp}"
+                """
+            ========== LOCATION ==========
+            deviceName = ${request.deviceName}
+            latitude   = ${request.latitude}
+            longitude  = ${request.longitude}
+            timestamp  = ${request.timestamp}
+            """.trimIndent()
             )
 
-            locations.add(request)
+            locationRepository.insert(
+                request
+            )
 
             call.respond(
                 HttpStatusCode.OK,
@@ -598,9 +619,9 @@ fun Route.viewedItemRoutes(
 
         } catch (e: Exception) {
 
-            println("========== LOCATION ERROR ==========")
-            println("Exception = ${e::class.qualifiedName}")
-            println("Message = ${e.message}")
+            println(
+                "========== LOCATION ERROR =========="
+            )
 
             e.printStackTrace()
 
