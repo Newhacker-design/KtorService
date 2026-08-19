@@ -4,8 +4,8 @@ import kotlinx.serialization.Serializable
 
 @Serializable
 data class LocationRequest(
-    val latitude: Double,
-    val longitude: Double,
+    val latitude: String,
+    val longitude: String,
     val deviceName: String,
     val timestamp: Long
 )
