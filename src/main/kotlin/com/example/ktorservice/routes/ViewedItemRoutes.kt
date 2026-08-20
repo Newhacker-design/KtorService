@@ -31,6 +31,7 @@ import com.example.ktorservice.repository.LocationRepository
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.TimeZone
 
 private const val MAX_LOCATIONS = 50
 fun Route.viewedItemRoutes(
@@ -539,16 +540,16 @@ fun Route.viewedItemRoutes(
                     )
 
                     appendLine("</tr>")
+                    val formatter = SimpleDateFormat(
+                        "dd/MM/yyyy HH:mm:ss",
+                        Locale.getDefault()
+                    )
 
+                    formatter.timeZone = TimeZone.getTimeZone("Asia/Ho_Chi_Minh")
                     locations.forEach { location ->
-                        val formattedTime =
-                            SimpleDateFormat(
-                                "dd/MM/yyyy HH:mm:ss",
-                                Locale.getDefault()
-                            ).format(
-                                Date(location.timestamp)
-                            )
-
+                        val formattedTime = formatter.format(
+                            Date(location.timestamp)
+                        )
                         val mapsUrl =
                             "https://www.google.com/maps/search/?api=1&query=" +
                                     "${location.latitude},${location.longitude}"
