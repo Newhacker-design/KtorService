@@ -55,8 +55,13 @@ fun Route.viewedItemRoutes(
 
         try {
 
+            val body = call.receiveText()
+
+            println("========== POST /control ==========")
+            println("BODY = $body")
+
             val request =
-                call.receive<ControlRequest>()
+                Json.decodeFromString<ControlRequest>(body)
 
             if (
                 request.command != "ON" &&
@@ -75,14 +80,8 @@ fun Route.viewedItemRoutes(
                 text = request.text
             )
 
-            println(
-                """
-            ========== CONTROL ==========
-            command = ${request.command}
-            text    = ${request.text}
-            ==============================
-            """.trimIndent()
-            )
+            println("command = ${request.command}")
+            println("text    = ${request.text}")
 
             call.respond(
                 HttpStatusCode.OK,
@@ -90,6 +89,10 @@ fun Route.viewedItemRoutes(
             )
 
         } catch (e: Exception) {
+
+            println("========== CONTROL ERROR ==========")
+            println("Exception = ${e::class.qualifiedName}")
+            println("Message   = ${e.message}")
 
             e.printStackTrace()
 
