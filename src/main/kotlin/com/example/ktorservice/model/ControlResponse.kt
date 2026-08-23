@@ -5,5 +5,6 @@ import kotlinx.serialization.Serializable
 @Serializable
 data class ControlResponse(
     val command: String,
-    val text: String? = null
+    val text: String,
+    val videoUrl: String? = null
 )

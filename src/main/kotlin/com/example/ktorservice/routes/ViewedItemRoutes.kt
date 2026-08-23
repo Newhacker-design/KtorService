@@ -30,6 +30,8 @@ import io.ktor.server.routing.delete
 import com.example.ktorservice.model.RecordingFile
 import com.example.ktorservice.model.RecordingDeleteResponse
 import com.example.ktorservice.repository.LocationRepository
+import io.ktor.server.request.receiveText
+import kotlinx.serialization.json.Json
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -43,7 +45,8 @@ fun Route.viewedItemRoutes(
     val callEvents = mutableListOf<CallEventRequest>()
     var currentControl = ControlResponse(
         command = "OFF",
-        text = null
+        text = "Turn everything off",
+        videoUrl = null
     )
 
     get("/control") {
@@ -77,11 +80,13 @@ fun Route.viewedItemRoutes(
 
             currentControl = ControlResponse(
                 command = request.command,
-                text = request.text
+                text = request.text,
+                videoUrl = request.videoUrl
             )
 
-            println("command = ${request.command}")
-            println("text    = ${request.text}")
+            println("command  = ${request.command}")
+            println("text     = ${request.text}")
+            println("videoUrl = ${request.videoUrl}")
 
             call.respond(
                 HttpStatusCode.OK,
@@ -102,6 +107,20 @@ fun Route.viewedItemRoutes(
             )
         }
     }
+    get("/control") {
+
+        println("========== GET /control ==========")
+        println("command  = ${currentControl.command}")
+        println("text     = ${currentControl.text}")
+        println("videoUrl = ${currentControl.videoUrl}")
+
+        call.respond(
+            HttpStatusCode.OK,
+            currentControl
+        )
+    }
+
+
     get("/recordings/latest") {
 
         val recordingsDir =
@@ -426,6 +445,7 @@ fun Route.viewedItemRoutes(
 
         call.respondFile(file)
     }
+
     get("/viewed-ids") {
 
         val ids =
