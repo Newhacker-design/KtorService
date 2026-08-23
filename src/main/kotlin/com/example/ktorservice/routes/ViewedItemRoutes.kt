@@ -36,6 +36,8 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
+import io.ktor.server.request.receiveMultipart
+import io.ktor.server.response.respond
 
 private const val MAX_LOCATIONS = 50
 fun Route.viewedItemRoutes(
@@ -119,7 +121,151 @@ fun Route.viewedItemRoutes(
             currentControl
         )
     }
+    post("/videos/upload") {
 
+        try {
+
+            val multipart = call.receiveMultipart()
+
+            var savedFileName: String? = null
+
+            multipart.forEachPart { part ->
+
+                if (part is PartData.FileItem) {
+
+                    val originalFileName =
+                        part.originalFileName ?: "video.mp4"
+
+                    val safeFileName =
+                        originalFileName.replace(
+                            Regex("[^a-zA-Z0-9._-]"),
+                            "_"
+                        )
+
+                    val fileName =
+                        "${System.currentTimeMillis()}_$safeFileName"
+
+                    val videosDir =
+                        File("videos")
+
+                    if (!videosDir.exists()) {
+                        videosDir.mkdirs()
+                    }
+
+                    val file =
+                        File(
+                            videosDir,
+                            fileName
+                        )
+
+                    val channel =
+                        part.provider()
+
+                    file.outputStream().use { output ->
+
+                        channel.copyTo(
+                            output
+                        )
+                    }
+
+                    savedFileName =
+                        fileName
+
+                    println(
+                        "VIDEO UPLOAD: ${file.absolutePath}"
+                    )
+
+                    println(
+                        "VIDEO SIZE: ${file.length()} bytes"
+                    )
+                }
+
+                part.dispose()
+            }
+
+            val fileName =
+                savedFileName
+                    ?: run {
+
+                        call.respond(
+                            HttpStatusCode.BadRequest,
+                            "No video file"
+                        )
+
+                        return@post
+                    }
+
+            val videoUrl =
+                "https://ktorservice.onrender.com/videos/$fileName"
+
+            println(
+                "VIDEO URL = $videoUrl"
+            )
+
+            call.respond(
+                HttpStatusCode.OK,
+                mapOf(
+                    "fileName" to fileName,
+                    "videoUrl" to videoUrl
+                )
+            )
+
+        } catch (e: Exception) {
+
+            println(
+                "========== VIDEO UPLOAD ERROR =========="
+            )
+
+            println(
+                "Exception = ${e::class.qualifiedName}"
+            )
+
+            println(
+                "Message = ${e.message}"
+            )
+
+            e.printStackTrace()
+
+            call.respond(
+                HttpStatusCode.InternalServerError,
+                "Upload error: ${e.message}"
+            )
+        }
+    }
+
+    get("/videos/{fileName}") {
+
+        val fileName =
+            call.parameters["fileName"]
+
+        if (fileName.isNullOrBlank()) {
+
+            call.respond(
+                HttpStatusCode.BadRequest,
+                "Missing file name"
+            )
+
+            return@get
+        }
+
+        val file =
+            File(
+                "videos",
+                fileName
+            )
+
+        if (!file.exists()) {
+
+            call.respond(
+                HttpStatusCode.NotFound,
+                "Video not found"
+            )
+
+            return@get
+        }
+
+        call.respondFile(file)
+    }
 
     get("/recordings/latest") {
 
