@@ -3,6 +3,8 @@ package com.example.ktorservice.routes
 
 import com.example.ktorservice.model.CallEventRequest
 import com.example.ktorservice.model.CallEventResponse
+import com.example.ktorservice.model.ControlRequest
+import com.example.ktorservice.model.ControlResponse
 import com.example.ktorservice.model.LatestRecording
 import com.example.ktorservice.model.LocationRequest
 import com.example.ktorservice.model.LocationResponse
@@ -39,7 +41,64 @@ fun Route.viewedItemRoutes(
     locationRepository: LocationRepository
 ) {
     val callEvents = mutableListOf<CallEventRequest>()
+    var currentControl = ControlResponse(
+        command = "OFF",
+        text = null
+    )
 
+    get("/control") {
+
+        call.respond(currentControl)
+    }
+
+    post("/control") {
+
+        try {
+
+            val request =
+                call.receive<ControlRequest>()
+
+            if (
+                request.command != "ON" &&
+                request.command != "OFF"
+            ) {
+                call.respond(
+                    HttpStatusCode.BadRequest,
+                    "command must be ON or OFF"
+                )
+
+                return@post
+            }
+
+            currentControl = ControlResponse(
+                command = request.command,
+                text = request.text
+            )
+
+            println(
+                """
+            ========== CONTROL ==========
+            command = ${request.command}
+            text    = ${request.text}
+            ==============================
+            """.trimIndent()
+            )
+
+            call.respond(
+                HttpStatusCode.OK,
+                currentControl
+            )
+
+        } catch (e: Exception) {
+
+            e.printStackTrace()
+
+            call.respond(
+                HttpStatusCode.InternalServerError,
+                "Control error: ${e.message}"
+            )
+        }
+    }
     get("/recordings/latest") {
 
         val recordingsDir =
