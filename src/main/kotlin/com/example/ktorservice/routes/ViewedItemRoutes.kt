@@ -122,107 +122,130 @@ fun Route.viewedItemRoutes(
             currentControl
         )
     }
+
     post("/videos/upload") {
 
-        val multipart = call.receiveMultipart()
+        println("========== UPLOAD START ==========")
 
-        var savedFile: File? = null
+        try {
 
-        multipart.forEachPart { part ->
+            val multipart = call.receiveMultipart()
 
-            try {
+            var savedFile: File? = null
 
-                if (part is PartData.FileItem) {
+            multipart.forEachPart { part ->
 
-                    val fileName =
-                        part.originalFileName
-                            ?.substringAfterLast("/")
-                            ?.substringAfterLast("\\")
-                            ?: "video_${System.currentTimeMillis()}.mp4"
+                try {
 
-                    val videoDir = File("/app/videos")
+                    if (part is PartData.FileItem) {
 
-                    if (!videoDir.exists()) {
+                        val fileName =
+                            part.originalFileName
+                                ?.substringAfterLast("/")
+                                ?.substringAfterLast("\\")
+                                ?: "video_${System.currentTimeMillis()}.mp4"
+
+                        val videoDir = File("/app/videos")
                         videoDir.mkdirs()
-                    }
 
-                    val file = File(videoDir, fileName)
+                        val file = File(videoDir, fileName)
 
-                    println("========== VIDEO UPLOAD ==========")
-                    println("File: ${file.absolutePath}")
+                        println("Uploading: ${file.absolutePath}")
 
-                    part.provider().toInputStream().use { input ->
+                        part.provider()
+                            .toInputStream()
+                            .use { input ->
 
-                        file.outputStream().use { output ->
+                                file.outputStream()
+                                    .use { output ->
 
-                            val buffer = ByteArray(64 * 1024)
+                                        val buffer =
+                                            ByteArray(64 * 1024)
 
-                            var total = 0L
+                                        var total = 0L
 
-                            while (true) {
+                                        while (true) {
 
-                                val count =
-                                    input.read(buffer)
+                                            val count =
+                                                input.read(buffer)
 
-                                if (count <= 0) {
-                                    break
-                                }
+                                            if (count <= 0) {
+                                                break
+                                            }
 
-                                output.write(
-                                    buffer,
-                                    0,
-                                    count
-                                )
+                                            output.write(
+                                                buffer,
+                                                0,
+                                                count
+                                            )
 
-                                total += count
+                                            total += count
 
-                                if (
-                                    total % (10L * 1024 * 1024)
-                                    < count
-                                ) {
-                                    println(
-                                        "Received ${total / 1024 / 1024} MB"
-                                    )
-                                }
+                                            if (
+                                                total % (10L * 1024 * 1024)
+                                                < count
+                                            ) {
+                                                println(
+                                                    "Received ${total / 1024 / 1024} MB"
+                                                )
+                                            }
+                                        }
+                                    }
                             }
-                        }
+
+                        savedFile = file
+
+                        println(
+                            "VIDEO UPLOADED: ${file.name}, size=${file.length()}"
+                        )
                     }
 
-                    savedFile = file
+                } catch (e: Exception) {
 
-                    println(
-                        "VIDEO UPLOADED: ${file.name}, size=${file.length()}"
-                    )
+                    println("========== PART ERROR ==========")
+                    e.printStackTrace()
+
+                    throw e
+
+                } finally {
+
+                    part.dispose()
                 }
-
-            } finally {
-
-                part.dispose()
             }
-        }
 
-        val file = savedFile
+            val file = savedFile
+                ?: throw IllegalStateException("No video file")
 
-        if (file == null) {
+            println(
+                "========== UPLOAD COMPLETE =========="
+            )
 
             call.respond(
-                HttpStatusCode.BadRequest,
-                "No video file"
+                HttpStatusCode.OK,
+                mapOf(
+                    "success" to true,
+                    "fileName" to file.name,
+                    "size" to file.length(),
+                    "videoUrl" to
+                            "https://ktorservice.onrender.com/videos/${file.name}"
+                )
             )
 
-            return@post
+        } catch (e: Exception) {
+
+            println("========== UPLOAD ERROR ==========")
+            println("Exception: ${e::class.qualifiedName}")
+            println("Message: ${e.message}")
+
+            e.printStackTrace()
+
+            if (!call.response.isCommitted) {
+                call.respond(
+                    HttpStatusCode.InternalServerError,
+                    "Upload error: ${e.message}"
+                )
+            }
         }
-
-        call.respond(
-            HttpStatusCode.OK,
-            mapOf(
-                "success" to true,
-                "fileName" to file.name,
-                "size" to file.length(),
-                "videoUrl" to
-                        "https://ktorservice.onrender.com/videos/${file.name}"
-            )
-        )
     }
     staticFiles(
         remotePath = "/videos",
