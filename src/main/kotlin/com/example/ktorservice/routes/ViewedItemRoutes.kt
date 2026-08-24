@@ -29,6 +29,7 @@ import io.ktor.server.response.respondText
 import io.ktor.server.routing.delete
 import com.example.ktorservice.model.RecordingFile
 import com.example.ktorservice.model.RecordingDeleteResponse
+import com.example.ktorservice.model.VideoUploadResponse
 import com.example.ktorservice.repository.LocationRepository
 import io.ktor.server.request.receiveText
 import kotlinx.serialization.json.Json
@@ -224,12 +225,11 @@ fun Route.viewedItemRoutes(
 
             call.respond(
                 HttpStatusCode.OK,
-                mapOf(
-                    "success" to true,
-                    "fileName" to file.name,
-                    "size" to file.length(),
-                    "videoUrl" to
-                            "https://ktorservice.onrender.com/videos/${file.name}"
+                VideoUploadResponse(
+                    success = true,
+                    fileName = file.name,
+                    size = file.length(),
+                    videoUrl = "https://ktorservice.onrender.com/videos/${file.name}"
                 )
             )
 
