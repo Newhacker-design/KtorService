@@ -55,11 +55,6 @@ fun Route.viewedItemRoutes(
         videoUrl = null
     )
 
-    get("/control") {
-
-        call.respond(currentControl)
-    }
-
     post("/control") {
 
         try {
