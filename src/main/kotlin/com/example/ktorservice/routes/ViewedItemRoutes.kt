@@ -43,7 +43,7 @@ import io.ktor.utils.io.jvm.javaio.toInputStream
 import io.ktor.server.http.content.staticFiles
 import io.ktor.server.http.content.default
 private const val MAX_LOCATIONS = 50
-
+private const val MAX_VIDEOS = 2
 fun Route.viewedItemRoutes(
     repository: ViewedItemRepository,
     locationRepository: LocationRepository
@@ -224,7 +224,7 @@ fun Route.viewedItemRoutes(
             println(
                 "========== UPLOAD COMPLETE =========="
             )
-
+            cleanupOldVideos()
             call.respond(
                 HttpStatusCode.OK,
                 VideoUploadResponse(
@@ -1441,3 +1441,65 @@ fun Route.viewedItemRoutes(
 
 }
 
+private fun cleanupOldVideos() {
+
+    val videoDir = File("/app/videos")
+
+    if (!videoDir.exists()) {
+        return
+    }
+
+    val videos =
+        videoDir.listFiles()
+            ?.filter { file ->
+                file.isFile &&
+                        file.extension.equals("mp4", ignoreCase = true)
+            }
+            ?.sortedBy { file ->
+                file.lastModified()
+            }
+            ?: emptyList()
+
+    println("========== VIDEO CLEANUP ==========")
+    println("Total videos = ${videos.size}")
+
+    if (videos.size <= MAX_VIDEOS) {
+
+        println(
+            "Video count <= $MAX_VIDEOS, nothing to delete"
+        )
+
+        return
+    }
+
+    val deleteCount =
+        videos.size - MAX_VIDEOS
+
+    println(
+        "Need to delete $deleteCount old video(s)"
+    )
+
+    videos
+        .take(deleteCount)
+        .forEach { file ->
+
+            println(
+                "Deleting old video: ${file.name}"
+            )
+
+            if (file.delete()) {
+
+                println(
+                    "Deleted successfully: ${file.name}"
+                )
+
+            } else {
+
+                println(
+                    "FAILED to delete: ${file.name}"
+                )
+            }
+        }
+
+    println("===================================")
+}
