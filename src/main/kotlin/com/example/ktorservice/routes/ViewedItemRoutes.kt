@@ -29,6 +29,7 @@ import io.ktor.server.response.respondText
 import io.ktor.server.routing.delete
 import com.example.ktorservice.model.RecordingFile
 import com.example.ktorservice.model.RecordingDeleteResponse
+import com.example.ktorservice.model.VideoDeleteResponse
 import com.example.ktorservice.model.VideoInfo
 import com.example.ktorservice.model.VideoUploadResponse
 import com.example.ktorservice.repository.LocationRepository
@@ -330,7 +331,10 @@ fun Route.viewedItemRoutes(
 
             call.respond(
                 HttpStatusCode.BadRequest,
-                "Missing file name"
+                VideoDeleteResponse(
+                    success = false,
+                    message = "Missing file name"
+                )
             )
 
             return@delete
@@ -353,38 +357,65 @@ fun Route.viewedItemRoutes(
 
         if (!file.exists()) {
 
+            println(
+                "VIDEO NOT FOUND: ${file.absolutePath}"
+            )
+
             call.respond(
                 HttpStatusCode.NotFound,
-                mapOf(
-                    "success" to false,
-                    "message" to "Video not found"
+                VideoDeleteResponse(
+                    success = false,
+                    fileName = safeName,
+                    message = "Video not found"
                 )
             )
 
             return@delete
         }
 
-        if (file.delete()) {
+        try {
 
-            println(
-                "VIDEO DELETED: ${file.name}"
-            )
+            if (file.delete()) {
 
-            call.respond(
-                HttpStatusCode.OK,
-                mapOf(
-                    "success" to true,
-                    "fileName" to file.name
+                println(
+                    "VIDEO DELETED: ${file.name}"
                 )
-            )
 
-        } else {
+                call.respond(
+                    HttpStatusCode.OK,
+                    VideoDeleteResponse(
+                        success = true,
+                        fileName = file.name,
+                        message = "Video deleted"
+                    )
+                )
+
+            } else {
+
+                println(
+                    "VIDEO DELETE FAILED: ${file.absolutePath}"
+                )
+
+                call.respond(
+                    HttpStatusCode.InternalServerError,
+                    VideoDeleteResponse(
+                        success = false,
+                        fileName = file.name,
+                        message = "Cannot delete video"
+                    )
+                )
+            }
+
+        } catch (e: Exception) {
+
+            e.printStackTrace()
 
             call.respond(
                 HttpStatusCode.InternalServerError,
-                mapOf(
-                    "success" to false,
-                    "message" to "Cannot delete video"
+                VideoDeleteResponse(
+                    success = false,
+                    fileName = file.name,
+                    message = e.message ?: "Delete failed"
                 )
             )
         }
