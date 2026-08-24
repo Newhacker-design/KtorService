@@ -29,6 +29,7 @@ import io.ktor.server.response.respondText
 import io.ktor.server.routing.delete
 import com.example.ktorservice.model.RecordingFile
 import com.example.ktorservice.model.RecordingDeleteResponse
+import com.example.ktorservice.model.VideoInfo
 import com.example.ktorservice.model.VideoUploadResponse
 import com.example.ktorservice.repository.LocationRepository
 import io.ktor.server.request.receiveText
@@ -254,28 +255,68 @@ fun Route.viewedItemRoutes(
         dir = File("/app/videos")
     )
 
+    get("/videos") {
+
+        val videoDir = File("/app/videos")
+
+        if (!videoDir.exists() || !videoDir.isDirectory) {
+            return@get call.respond(
+                HttpStatusCode.OK,
+                emptyList<VideoInfo>()
+            )
+        }
+
+        val videos = videoDir
+            .listFiles()
+            ?.filter { it.isFile }
+            ?.filter {
+                it.extension.lowercase() in setOf(
+                    "mp4",
+                    "mov",
+                    "mkv",
+                    "webm",
+                    "avi"
+                )
+            }
+            ?.sortedByDescending { it.lastModified() }
+            ?.map { file ->
+                VideoInfo(
+                    name = file.name,
+                    size = file.length(),
+                    url = "https://ktorservice.onrender.com/videos/${file.name}"
+                )
+            }
+            ?: emptyList()
+
+        call.respond(
+            HttpStatusCode.OK,
+            videos
+        )
+    }
     get("/videos/{fileName}") {
 
-        val fileName =
-            call.parameters["fileName"]
-
-        if (fileName.isNullOrBlank()) {
-            call.respond(
+        val fileName = call.parameters["fileName"]
+            ?: return@get call.respond(
                 HttpStatusCode.BadRequest,
                 "Missing file name"
             )
-            return@get
-        }
 
-        val file =
-            File("videos", fileName)
+        // Chống path traversal
+        val safeFileName = File(fileName).name
 
-        if (!file.exists()) {
-            call.respond(
+        val file = File("/app/videos", safeFileName)
+
+        println("========== VIDEO REQUEST ==========")
+        println("Requested: $safeFileName")
+        println("Path: ${file.absolutePath}")
+        println("Exists: ${file.exists()}")
+        println("Size: ${if (file.exists()) file.length() else 0}")
+
+        if (!file.exists() || !file.isFile) {
+            return@get call.respond(
                 HttpStatusCode.NotFound,
                 "Video not found"
             )
-            return@get
         }
 
         call.respondFile(file)
