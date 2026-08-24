@@ -321,6 +321,74 @@ fun Route.viewedItemRoutes(
 
         call.respondFile(file)
     }
+    delete("/videos/{fileName}") {
+
+        val fileName =
+            call.parameters["fileName"]
+
+        if (fileName.isNullOrBlank()) {
+
+            call.respond(
+                HttpStatusCode.BadRequest,
+                "Missing file name"
+            )
+
+            return@delete
+        }
+
+        val safeName =
+            fileName
+                .substringAfterLast("/")
+                .substringAfterLast("\\")
+
+        val file =
+            File(
+                "/app/videos",
+                safeName
+            )
+
+        println(
+            "DELETE VIDEO: ${file.absolutePath}"
+        )
+
+        if (!file.exists()) {
+
+            call.respond(
+                HttpStatusCode.NotFound,
+                mapOf(
+                    "success" to false,
+                    "message" to "Video not found"
+                )
+            )
+
+            return@delete
+        }
+
+        if (file.delete()) {
+
+            println(
+                "VIDEO DELETED: ${file.name}"
+            )
+
+            call.respond(
+                HttpStatusCode.OK,
+                mapOf(
+                    "success" to true,
+                    "fileName" to file.name
+                )
+            )
+
+        } else {
+
+            call.respond(
+                HttpStatusCode.InternalServerError,
+                mapOf(
+                    "success" to false,
+                    "message" to "Cannot delete video"
+                )
+            )
+        }
+    }
 
     get("/recordings/latest") {
 
