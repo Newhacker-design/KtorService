@@ -36,11 +36,11 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
-import io.ktor.server.request.receiveMultipart
-import io.ktor.server.response.respond
-import io.ktor.server.routing.post
 import io.ktor.utils.io.jvm.javaio.toInputStream
+import io.ktor.server.http.content.staticFiles
+import io.ktor.server.http.content.default
 private const val MAX_LOCATIONS = 50
+
 fun Route.viewedItemRoutes(
     repository: ViewedItemRepository,
     locationRepository: LocationRepository
@@ -130,53 +130,93 @@ fun Route.viewedItemRoutes(
 
         multipart.forEachPart { part ->
 
-            if (part is PartData.FileItem) {
+            try {
 
-                val fileName =
-                    part.originalFileName
-                        ?: "video_${System.currentTimeMillis()}.mp4"
+                if (part is PartData.FileItem) {
 
-                val videoDir = File("videos")
+                    val fileName =
+                        part.originalFileName
+                            ?.substringAfterLast("/")
+                            ?.substringAfterLast("\\")
+                            ?: "video_${System.currentTimeMillis()}.mp4"
 
-                if (!videoDir.exists()) {
-                    videoDir.mkdirs()
-                }
+                    val videoDir = File("/app/videos")
 
-                val file = File(videoDir, fileName)
-
-                println("Uploading: ${file.absolutePath}")
-
-                val input = part.provider().toInputStream()
-
-                input.use { source ->
-                    file.outputStream().use { output ->
-                        source.copyTo(output)
+                    if (!videoDir.exists()) {
+                        videoDir.mkdirs()
                     }
+
+                    val file = File(videoDir, fileName)
+
+                    println("========== VIDEO UPLOAD ==========")
+                    println("File: ${file.absolutePath}")
+
+                    part.provider().toInputStream().use { input ->
+
+                        file.outputStream().use { output ->
+
+                            val buffer = ByteArray(64 * 1024)
+
+                            var total = 0L
+
+                            while (true) {
+
+                                val count =
+                                    input.read(buffer)
+
+                                if (count <= 0) {
+                                    break
+                                }
+
+                                output.write(
+                                    buffer,
+                                    0,
+                                    count
+                                )
+
+                                total += count
+
+                                if (
+                                    total % (10L * 1024 * 1024)
+                                    < count
+                                ) {
+                                    println(
+                                        "Received ${total / 1024 / 1024} MB"
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    savedFile = file
+
+                    println(
+                        "VIDEO UPLOADED: ${file.name}, size=${file.length()}"
+                    )
                 }
 
-                savedFile = file
+            } finally {
 
-                println(
-                    "VIDEO UPLOADED: ${file.name}, size=${file.length()}"
-                )
+                part.dispose()
             }
-
-            part.dispose()
         }
 
         val file = savedFile
 
         if (file == null) {
+
             call.respond(
                 HttpStatusCode.BadRequest,
                 "No video file"
             )
+
             return@post
         }
 
         call.respond(
             HttpStatusCode.OK,
             mapOf(
+                "success" to true,
                 "fileName" to file.name,
                 "size" to file.length(),
                 "videoUrl" to
@@ -184,6 +224,10 @@ fun Route.viewedItemRoutes(
             )
         )
     }
+    staticFiles(
+        remotePath = "/videos",
+        dir = File("/app/videos")
+    )
 
     get("/videos/{fileName}") {
 
