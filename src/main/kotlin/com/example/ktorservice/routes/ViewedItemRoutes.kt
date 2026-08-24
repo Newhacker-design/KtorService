@@ -129,7 +129,9 @@ fun Route.viewedItemRoutes(
 
         try {
 
-            val multipart = call.receiveMultipart()
+            val multipart = call.receiveMultipart(
+                formFieldLimit = 500L * 1024 * 1024
+            )
 
             var savedFile: File? = null
 
