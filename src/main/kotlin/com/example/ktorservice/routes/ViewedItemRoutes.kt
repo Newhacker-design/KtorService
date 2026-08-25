@@ -50,8 +50,8 @@ fun Route.viewedItemRoutes(
 ) {
     val callEvents = mutableListOf<CallEventRequest>()
     var currentControl = ControlResponse(
-        command = "OFF",
-        text = "Turn everything off",
+        command = "",
+        text = "",
         videoUrl = null
     )
 
