@@ -1,5 +1,9 @@
 package com.example.ktorservice.config
 
+import com.example.ktorservice.database.DevicesTable
+import com.example.ktorservice.database.LicensesTable
+import com.example.ktorservice.database.SessionsTable
+import com.example.ktorservice.database.UsersTable
 import com.example.ktorservice.database.table.LocationTable
 import com.example.ktorservice.database.table.ViewedItems
 import com.zaxxer.hikari.HikariConfig
@@ -55,7 +59,11 @@ object DatabaseFactory {
 
             SchemaUtils.create(
                 ViewedItems,
-                LocationTable
+                LocationTable,
+                UsersTable,
+                DevicesTable,
+                LicensesTable,
+                SessionsTable
             )
         }
 
