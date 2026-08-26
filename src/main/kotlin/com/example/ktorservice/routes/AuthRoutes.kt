@@ -15,56 +15,76 @@ fun Route.authRoutes(
 
     post("/auth/login") {
 
-        val request =
-            call.receive<LoginRequest>()
+        try {
 
-        if (
-            request.username.isBlank() ||
-            request.password.isBlank()
-        ) {
+            val request =
+                call.receive<LoginRequest>()
+
+            println(
+                "LOGIN REQUEST: username=${request.username}"
+            )
+
+            if (
+                request.username.isBlank() ||
+                request.password.isBlank()
+            ) {
+
+                call.respond(
+                    HttpStatusCode.BadRequest,
+                    LoginResponse(
+                        success = false,
+                        message =
+                            "Username and password are required"
+                    )
+                )
+
+                return@post
+            }
+
+            val result =
+                authService.login(
+                    username = request.username.trim(),
+                    password = request.password
+                )
+
+            if (!result.success) {
+
+                call.respond(
+                    HttpStatusCode.Unauthorized,
+                    LoginResponse(
+                        success = false,
+                        message = result.message
+                    )
+                )
+
+                return@post
+            }
+
+            call.respond(
+                HttpStatusCode.OK,
+                LoginResponse(
+                    success = true,
+                    token = result.token,
+                    userId = result.userId
+                )
+            )
+
+        } catch (e: Exception) {
+
+            e.printStackTrace()
+
+            println(
+                "LOGIN ERROR: ${e::class.qualifiedName}: ${e.message}"
+            )
 
             call.respond(
                 HttpStatusCode.BadRequest,
                 LoginResponse(
                     success = false,
                     message =
-                        "Username and password are required"
+                        "Invalid request: ${e.message}"
                 )
             )
-
-            return@post
         }
-
-        val result =
-            authService.login(
-                username =
-                    request.username.trim(),
-                password =
-                    request.password
-            )
-
-        if (!result.success) {
-
-            call.respond(
-                HttpStatusCode.Unauthorized,
-                LoginResponse(
-                    success = false,
-                    message =
-                        result.message
-                )
-            )
-
-            return@post
-        }
-
-        call.respond(
-            LoginResponse(
-                success = true,
-                token =
-                    result.token,
-                userId =
-                    result.userId
-            )
-        )
     }
 }
