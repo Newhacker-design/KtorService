@@ -10,6 +10,7 @@ import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import com.example.ktorservice.model.RegisterResponse
+import com.example.ktorservice.security.requireUserId
 fun Route.authRoutes(
     authService: AuthService
 ) {
@@ -209,5 +210,34 @@ fun Route.authRoutes(
                 )
             )
         }
+    }
+    get("/auth/me") {
+
+        val userId =
+            call.requireUserId(
+                authService
+            )
+
+        if (userId == null) {
+
+            call.respond(
+                HttpStatusCode.Unauthorized,
+                LoginResponse(
+                    success = false,
+                    message =
+                        "Invalid or expired token"
+                )
+            )
+
+            return@get
+        }
+
+        call.respond(
+            HttpStatusCode.OK,
+            LoginResponse(
+                success = true,
+                userId = userId
+            )
+        )
     }
 }
