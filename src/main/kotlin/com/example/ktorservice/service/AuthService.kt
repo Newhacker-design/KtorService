@@ -46,9 +46,7 @@ class AuthService {
             val valid =
                 PasswordHasher.verify(
                     password,
-                    user[
-                        UsersTable.passwordHash
-                    ]
+                    user[UsersTable.passwordHash]
                 )
 
             if (!valid) {
@@ -97,6 +95,64 @@ class AuthService {
         }
     }
 
+    fun register(
+        username: String,
+        password: String
+    ): RegisterResult {
+
+        return transaction {
+
+            val existingUser =
+                UsersTable
+                    .selectAll()
+                    .where {
+                        UsersTable.username eq username
+                    }
+                    .singleOrNull()
+
+            if (existingUser != null) {
+
+                return@transaction RegisterResult(
+                    success = false,
+                    message = "Username already exists"
+                )
+            }
+
+            val passwordHash =
+                PasswordHasher.hash(password)
+
+            val now =
+                System.currentTimeMillis()
+
+            val insertStatement =
+                UsersTable.insert {
+
+                    it[UsersTable.username] =
+                        username
+
+                    it[UsersTable.passwordHash] =
+                        passwordHash
+
+                    it[UsersTable.status] =
+                        "ACTIVE"
+
+                    it[UsersTable.createdAt] =
+                        now
+                }
+
+            val userId =
+                insertStatement[
+                    UsersTable.id
+                ]
+
+            RegisterResult(
+                success = true,
+                userId = userId,
+                username = username
+            )
+        }
+    }
+
     fun getUserId(
         token: String
     ): Int? {
@@ -126,5 +182,12 @@ data class LoginResult(
     val success: Boolean,
     val token: String? = null,
     val userId: Int? = null,
+    val message: String? = null
+)
+
+data class RegisterResult(
+    val success: Boolean,
+    val userId: Int? = null,
+    val username: String? = null,
     val message: String? = null
 )

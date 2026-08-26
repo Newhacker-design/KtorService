@@ -41,3 +41,16 @@ data class LicenseResponse(
     val expiresAt: Long? = null,
     val message: String? = null
 )
+@Serializable
+data class RegisterRequest(
+    val username: String,
+    val password: String
+)
+
+@Serializable
+data class RegisterResponse(
+    val success: Boolean,
+    val userId: Int? = null,
+    val username: String? = null,
+    val message: String? = null
+)

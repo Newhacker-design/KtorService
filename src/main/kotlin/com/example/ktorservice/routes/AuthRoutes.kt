@@ -8,7 +8,8 @@ import io.ktor.server.application.*
 import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
-
+import com.example.ktorservice.model.RegisterRequest
+import com.example.ktorservice.model.RegisterResponse
 fun Route.authRoutes(
     authService: AuthService
 ) {
@@ -80,6 +81,125 @@ fun Route.authRoutes(
             call.respond(
                 HttpStatusCode.BadRequest,
                 LoginResponse(
+                    success = false,
+                    message =
+                        "Invalid request: ${e.message}"
+                )
+            )
+        }
+    }
+    post("/auth/register") {
+
+        try {
+
+            val request =
+                call.receive<RegisterRequest>()
+
+            val username =
+                request.username.trim()
+
+            val password =
+                request.password
+
+            println(
+                "REGISTER REQUEST: username=$username"
+            )
+
+            if (username.isBlank()) {
+
+                call.respond(
+                    HttpStatusCode.BadRequest,
+                    RegisterResponse(
+                        success = false,
+                        message = "Username is required"
+                    )
+                )
+
+                return@post
+            }
+
+            if (password.isBlank()) {
+
+                call.respond(
+                    HttpStatusCode.BadRequest,
+                    RegisterResponse(
+                        success = false,
+                        message = "Password is required"
+                    )
+                )
+
+                return@post
+            }
+
+            if (username.length < 3) {
+
+                call.respond(
+                    HttpStatusCode.BadRequest,
+                    RegisterResponse(
+                        success = false,
+                        message =
+                            "Username must be at least 3 characters"
+                    )
+                )
+
+                return@post
+            }
+
+            if (password.length < 6) {
+
+                call.respond(
+                    HttpStatusCode.BadRequest,
+                    RegisterResponse(
+                        success = false,
+                        message =
+                            "Password must be at least 6 characters"
+                    )
+                )
+
+                return@post
+            }
+
+            val result =
+                authService.register(
+                    username = username,
+                    password = password
+                )
+
+            if (!result.success) {
+
+                call.respond(
+                    HttpStatusCode.Conflict,
+                    RegisterResponse(
+                        success = false,
+                        message = result.message
+                    )
+                )
+
+                return@post
+            }
+
+            call.respond(
+                HttpStatusCode.Created,
+                RegisterResponse(
+                    success = true,
+                    userId = result.userId,
+                    username = result.username,
+                    message = "User created successfully"
+                )
+            )
+
+        } catch (e: Exception) {
+
+            e.printStackTrace()
+
+            println(
+                "REGISTER ERROR: " +
+                        "${e::class.qualifiedName}: ${e.message}"
+            )
+
+            call.respond(
+                HttpStatusCode.BadRequest,
+                RegisterResponse(
                     success = false,
                     message =
                         "Invalid request: ${e.message}"
