@@ -10,6 +10,7 @@ import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import com.example.ktorservice.model.RegisterResponse
+import com.example.ktorservice.security.getBearerToken
 import com.example.ktorservice.security.requireUserId
 fun Route.authRoutes(
     authService: AuthService
@@ -237,6 +238,53 @@ fun Route.authRoutes(
             LoginResponse(
                 success = true,
                 userId = userId
+            )
+        )
+    }
+    post("/auth/logout") {
+
+        val token =
+            call.getBearerToken()
+
+        if (token == null) {
+
+            call.respond(
+                HttpStatusCode.Unauthorized,
+                LoginResponse(
+                    success = false,
+                    message =
+                        "Missing or invalid Authorization header"
+                )
+            )
+
+            return@post
+        }
+
+        val userId =
+            authService.getUserId(token)
+
+        if (userId == null) {
+
+            call.respond(
+                HttpStatusCode.Unauthorized,
+                LoginResponse(
+                    success = false,
+                    message =
+                        "Invalid or expired token"
+                )
+            )
+
+            return@post
+        }
+
+        authService.logout(token)
+
+        call.respond(
+            HttpStatusCode.OK,
+            LoginResponse(
+                success = true,
+                userId = userId,
+                message = "Logged out successfully"
             )
         )
     }

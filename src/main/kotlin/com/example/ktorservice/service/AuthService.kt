@@ -5,6 +5,7 @@ import com.example.ktorservice.database.UsersTable
 import com.example.ktorservice.security.PasswordHasher
 import com.example.ktorservice.security.TokenGenerator
 import org.jetbrains.exposed.sql.*
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.transactions.transaction
 
 class AuthService {
@@ -176,18 +177,30 @@ class AuthService {
                 )
         }
     }
+    fun logout(
+        token: String
+    ): Boolean {
+
+        return transaction {
+
+            SessionsTable
+                .deleteWhere {
+                    SessionsTable.token eq token
+                } > 0
+        }
+    }
+
+    data class LoginResult(
+        val success: Boolean,
+        val token: String? = null,
+        val userId: Int? = null,
+        val message: String? = null
+    )
+
+    data class RegisterResult(
+        val success: Boolean,
+        val userId: Int? = null,
+        val username: String? = null,
+        val message: String? = null
+    )
 }
-
-data class LoginResult(
-    val success: Boolean,
-    val token: String? = null,
-    val userId: Int? = null,
-    val message: String? = null
-)
-
-data class RegisterResult(
-    val success: Boolean,
-    val userId: Int? = null,
-    val username: String? = null,
-    val message: String? = null
-)
