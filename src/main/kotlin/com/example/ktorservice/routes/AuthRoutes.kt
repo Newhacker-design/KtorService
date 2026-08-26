@@ -2,13 +2,13 @@ package com.example.ktorservice.routes
 
 import com.example.ktorservice.model.LoginRequest
 import com.example.ktorservice.model.LoginResponse
+import com.example.ktorservice.model.RegisterRequest
 import com.example.ktorservice.service.AuthService
 import io.ktor.http.*
 import io.ktor.server.application.*
 import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
-import com.example.ktorservice.model.RegisterRequest
 import com.example.ktorservice.model.RegisterResponse
 fun Route.authRoutes(
     authService: AuthService
@@ -188,14 +188,17 @@ fun Route.authRoutes(
                 )
             )
 
-        } catch (e: Exception) {
+        }
+        catch (e: Exception) {
 
             e.printStackTrace()
 
-            println(
-                "REGISTER ERROR: " +
-                        "${e::class.qualifiedName}: ${e.message}"
-            )
+            println("========== REGISTER ERROR ==========")
+            println("TYPE    = ${e::class.qualifiedName}")
+            println("MESSAGE = ${e.message}")
+            println("CAUSE   = ${e.cause?.javaClass?.name}")
+            println("CAUSE MESSAGE = ${e.cause?.message}")
+            println("===================================")
 
             call.respond(
                 HttpStatusCode.BadRequest,
