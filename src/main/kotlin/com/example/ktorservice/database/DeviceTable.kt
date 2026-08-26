@@ -1,12 +1,9 @@
+
 package com.example.ktorservice.database
 
-import org.jetbrains.exposed.sql.Table
+import org.jetbrains.exposed.dao.id.IntIdTable
 
-object DevicesTable : Table("devices") {
-
-    val id =
-        integer("id")
-            .autoIncrement()
+object DevicesTable : IntIdTable("devices") {
 
     val userId =
         integer("user_id")
@@ -42,7 +39,4 @@ object DevicesTable : Table("devices") {
 
     val createdAt =
         long("created_at")
-
-    override val primaryKey =
-        PrimaryKey(id)
 }

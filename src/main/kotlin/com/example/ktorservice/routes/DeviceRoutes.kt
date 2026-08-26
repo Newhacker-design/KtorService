@@ -50,7 +50,7 @@ fun Route.deviceRoutes(
         }
 
         val deviceId =
-            deviceService.register(
+            deviceService.registerDevice(
                 userId = userId,
                 deviceId =
                     request.deviceId,

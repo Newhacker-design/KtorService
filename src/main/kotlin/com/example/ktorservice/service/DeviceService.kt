@@ -3,10 +3,10 @@ package com.example.ktorservice.service
 
 import com.example.ktorservice.database.DevicesTable
 import org.jetbrains.exposed.sql.and
-import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.transactions.transaction
 import org.jetbrains.exposed.sql.update
+import org.jetbrains.exposed.sql.insertAndGetId
 
 class DeviceService {
 
@@ -62,22 +62,20 @@ class DeviceService {
                     it[DevicesTable.status] = "ACTIVE"
                 }
 
+                /*
+                 * IntIdTable.id trả về EntityID<Int>
+                 * nên phải lấy .value
+                 */
                 return@transaction existing[
                     DevicesTable.id
-                ]
+                ].value
             }
 
             /*
              * Device mới
-             * -> INSERT
-             *
-             * Không dùng insertAndGetId()
-             * vì DevicesTable đang kế thừa Table,
-             * không phải IntIdTable.
              */
-
             val inserted =
-                DevicesTable.insert {
+                DevicesTable.insertAndGetId {
 
                     it[DevicesTable.userId] =
                         userId
@@ -101,9 +99,11 @@ class DeviceService {
                         now
                 }
 
-            inserted[
-                DevicesTable.id
-            ]
+            /*
+             * inserted đã là EntityID<Int>
+             * -> lấy .value để trả về Int
+             */
+            inserted.value
         }
     }
 
@@ -160,7 +160,7 @@ class DeviceService {
                     DeviceInfo(
 
                         id =
-                            it[DevicesTable.id],
+                            it[DevicesTable.id].value,
 
                         userId =
                             it[DevicesTable.userId],
@@ -213,7 +213,7 @@ class DeviceService {
                     DeviceInfo(
 
                         id =
-                            it[DevicesTable.id],
+                            it[DevicesTable.id].value,
 
                         userId =
                             it[DevicesTable.userId],
@@ -299,3 +299,4 @@ data class DeviceInfo(
 
     val createdAt: Long
 )
+
