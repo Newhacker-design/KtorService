@@ -66,6 +66,61 @@ class LicenseService {
             )
         }
     }
+    fun createLicense(
+        userId: Int,
+        deviceId: Int,
+        type: String,
+        durationDays: Int
+    ): LicenseResult {
+
+        return transaction {
+
+            val now =
+                System.currentTimeMillis()
+
+            val expiresAt =
+                now +
+                        durationDays.toLong() *
+                        24L *
+                        60L *
+                        60L *
+                        1000L
+
+            val licenseKey =
+                generateLicenseKey()
+
+            LicensesTable.insert {
+
+                it[LicensesTable.userId] =
+                    userId
+
+                it[LicensesTable.deviceId] =
+                    deviceId
+
+                it[LicensesTable.licenseKey] =
+                    licenseKey
+
+                it[LicensesTable.type] =
+                    type
+
+                it[LicensesTable.expiresAt] =
+                    expiresAt
+
+                it[LicensesTable.status] =
+                    "ACTIVE"
+
+                it[LicensesTable.createdAt] =
+                    now
+            }
+
+            LicenseResult(
+                active = true,
+                licenseKey = licenseKey,
+                type = type,
+                expiresAt = expiresAt
+            )
+        }
+    }
 }
 
 data class LicenseResult(
@@ -75,3 +130,16 @@ data class LicenseResult(
     val expiresAt: Long? = null,
     val message: String? = null
 )
+
+
+private fun generateLicenseKey(): String {
+
+    return java.util.UUID
+        .randomUUID()
+        .toString()
+        .uppercase()
+        .replace("-", "")
+        .chunked(5)
+        .take(4)
+        .joinToString("-")
+}

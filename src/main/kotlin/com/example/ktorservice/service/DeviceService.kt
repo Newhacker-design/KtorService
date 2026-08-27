@@ -70,7 +70,23 @@ class DeviceService {
                     DevicesTable.id
                 ].value
             }
+            /*
+            * Mỗi Thiết bị chỉ 1 tài khoản
+             */
+            val existingOtherUser =
+                DevicesTable
+                    .selectAll()
+                    .where {
+                        (DevicesTable.deviceId eq deviceId) and
+                                (DevicesTable.userId neq userId)
+                    }
+                    .singleOrNull()
 
+            if (existingOtherUser != null) {
+                throw IllegalStateException(
+                    "Device is already registered to another user"
+                )
+            }
             /*
              * Device mới
              */

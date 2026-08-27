@@ -53,4 +53,10 @@ data class RegisterResponse(
     val userId: Int? = null,
     val username: String? = null,
     val message: String? = null
+)@Serializable
+data class CreateLicenseRequest(
+    val userId: Int,
+    val deviceId: Int,
+    val type: String,
+    val durationDays: Int
 )
