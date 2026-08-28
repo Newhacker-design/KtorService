@@ -7,6 +7,7 @@ import com.example.ktorservice.service.AuthService
 import com.example.ktorservice.service.LicenseService
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.request.receive
+import io.ktor.server.request.receiveText
 import io.ktor.server.response.respond
 import io.ktor.server.routing.*
 
@@ -67,59 +68,90 @@ fun Route.licenseRoutes(
 
     post("/licenses/create") {
 
-        val request =
-            call.receive<CreateLicenseRequest>()
+        println("========== CREATE LICENSE ==========")
+        println("CREATE LICENSE ROUTE HIT")
 
-        if (request.userId <= 0) {
+        try {
+
+            val rawBody = call.receiveText()
+
+            println("RAW BODY = $rawBody")
+
+            val request =
+                kotlinx.serialization.json.Json.decodeFromString<CreateLicenseRequest>(
+                    rawBody
+                )
+
+            println("REQUEST = $request")
+
+            if (request.userId <= 0) {
+                call.respond(
+                    HttpStatusCode.BadRequest,
+                    LicenseResponse(
+                        active = false,
+                        message = "Invalid userId"
+                    )
+                )
+                return@post
+            }
+
+            if (request.deviceId <= 0) {
+                call.respond(
+                    HttpStatusCode.BadRequest,
+                    LicenseResponse(
+                        active = false,
+                        message = "Invalid deviceId"
+                    )
+                )
+                return@post
+            }
+
+            if (request.durationDays <= 0) {
+                call.respond(
+                    HttpStatusCode.BadRequest,
+                    LicenseResponse(
+                        active = false,
+                        message = "Invalid durationDays"
+                    )
+                )
+                return@post
+            }
+
+            println("Calling LicenseService...")
+
+            val result =
+                licenseService.createLicense(
+                    userId = request.userId,
+                    deviceId = request.deviceId,
+                    type = request.type,
+                    durationDays = request.durationDays
+                )
+
+            println("LICENSE RESULT = $result")
+
             call.respond(
-                HttpStatusCode.BadRequest,
+                HttpStatusCode.OK,
                 LicenseResponse(
-                    active = false,
-                    message = "Invalid userId"
+                    active = result.active,
+                    licenseKey = result.licenseKey,
+                    type = result.type,
+                    expiresAt = result.expiresAt,
+                    message = "License created successfully"
                 )
             )
-            return@post
-        }
 
-        if (request.deviceId <= 0) {
+        } catch (e: Exception) {
+
+            println("========== CREATE LICENSE ERROR ==========")
+            e.printStackTrace()
+
             call.respond(
-                HttpStatusCode.BadRequest,
+                HttpStatusCode.InternalServerError,
                 LicenseResponse(
                     active = false,
-                    message = "Invalid deviceId"
+                    message = e.message ?: "Unknown error"
                 )
             )
-            return@post
         }
-
-        if (request.durationDays <= 0) {
-            call.respond(
-                HttpStatusCode.BadRequest,
-                LicenseResponse(
-                    active = false,
-                    message = "Invalid durationDays"
-                )
-            )
-            return@post
-        }
-
-        val result =
-            licenseService.createLicense(
-                userId = request.userId,
-                deviceId = request.deviceId,
-                type = request.type,
-                durationDays = request.durationDays
-            )
-
-        call.respond(
-            HttpStatusCode.OK,
-            LicenseResponse(
-                active = result.active,
-                licenseKey = result.licenseKey,
-                type = result.type,
-                expiresAt = result.expiresAt,
-                message = "License created successfully"
-            )
-        )
     }
 }

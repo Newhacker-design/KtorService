@@ -53,7 +53,8 @@ data class RegisterResponse(
     val userId: Int? = null,
     val username: String? = null,
     val message: String? = null
-)@Serializable
+)
+@Serializable
 data class CreateLicenseRequest(
     val userId: Int,
     val deviceId: Int,
