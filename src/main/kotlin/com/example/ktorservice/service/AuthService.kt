@@ -24,6 +24,21 @@ class AuthService {
                         UsersTable.username eq username
                     }
                     .singleOrNull()
+            println("========== LOGIN DEBUG ==========")
+            println("USERNAME = [$username]")
+            println("USER EXISTS = ${user != null}")
+
+            if (user != null) {
+                println("USER ID = ${user[UsersTable.id]}")
+                println("STATUS = [${user[UsersTable.status]}]")
+                println(
+                    "HASH LENGTH = ${
+                        user[UsersTable.passwordHash].length
+                    }"
+                )
+            }
+
+            println("=================================")
 
             if (user == null) {
 
