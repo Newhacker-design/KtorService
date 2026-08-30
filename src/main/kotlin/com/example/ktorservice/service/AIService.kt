@@ -13,7 +13,7 @@ class AIService {
 
     private val model =
         System.getenv("GEMINI_MODEL")
-            ?: "gemini-3.7-flash"
+            ?: "gemini-3.5-flash-lite"
 
     private val json =
         Json {
