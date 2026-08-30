@@ -13,44 +13,71 @@ import com.zaxxer.hikari.HikariDataSource
 import org.jetbrains.exposed.sql.Database
 import org.jetbrains.exposed.sql.SchemaUtils
 import org.jetbrains.exposed.sql.transactions.transaction
-import java.io.File
 
 object DatabaseFactory {
 
     fun init() {
 
-        val databasePath =
-            System.getenv("DATABASE_PATH")
-                ?: "/app/data/database.db"
+        val host =
+            System.getenv("DB_HOST")
+                ?: "localhost"
 
-        val databaseFile =
-            File(databasePath)
+        val port =
+            System.getenv("DB_PORT")
+                ?: "5432"
 
-        databaseFile.parentFile?.mkdirs()
+        val database =
+            System.getenv("DB_NAME")
+                ?: "ktorservice"
+
+        val user =
+            System.getenv("DB_USER")
+                ?: "ktoruser"
+
+        val password =
+            System.getenv("DB_PASSWORD")
+                ?: error("DB_PASSWORD is not configured")
 
         println("========================================")
-        println("DATABASE PATH ENV = ${System.getenv("DATABASE_PATH")}")
-        println("DATABASE ABSOLUTE PATH = ${databaseFile.absolutePath}")
-        println("DATABASE EXISTS = ${databaseFile.exists()}")
-        println("DATABASE SIZE = ${if (databaseFile.exists()) databaseFile.length() else 0}")
-        println("DATABASE PARENT = ${databaseFile.parentFile?.absolutePath}")
+        println("DATABASE TYPE = PostgreSQL")
+        println("DATABASE HOST = $host")
+        println("DATABASE PORT = $port")
+        println("DATABASE NAME = $database")
+        println("DATABASE USER = $user")
         println("========================================")
 
         val config =
             HikariConfig().apply {
 
                 driverClassName =
-                    "org.sqlite.JDBC"
+                    "org.postgresql.Driver"
 
                 jdbcUrl =
-                    "jdbc:sqlite:${databaseFile.absolutePath}"
+                    "jdbc:postgresql://$host:$port/$database"
 
-                maximumPoolSize = 5
+                username =
+                    user
 
-                isAutoCommit = false
+                this.password =
+                    password
+
+                maximumPoolSize =
+                    5
+
+                minimumIdle =
+                    1
+
+                isAutoCommit =
+                    false
+
+                connectionTimeout =
+                    10_000
+
+                validationTimeout =
+                    5_000
 
                 transactionIsolation =
-                    "TRANSACTION_SERIALIZABLE"
+                    "TRANSACTION_READ_COMMITTED"
 
                 validate()
             }
@@ -74,11 +101,8 @@ object DatabaseFactory {
             )
         }
 
-        println("========== DATABASE DEBUG ==========")
-        println("DATABASE_PATH ENV = ${System.getenv("DATABASE_PATH")}")
-        println("DATABASE ABSOLUTE PATH = ${databaseFile.absolutePath}")
-        println("DATABASE EXISTS = ${databaseFile.exists()}")
-        println("DATABASE SIZE = ${if (databaseFile.exists()) databaseFile.length() else 0}")
-        println("====================================")
+        println("========================================")
+        println("POSTGRESQL DATABASE INITIALIZED")
+        println("========================================")
     }
 }
