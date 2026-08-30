@@ -21,7 +21,7 @@ object DatabaseFactory {
 
         val databasePath =
             System.getenv("DATABASE_PATH")
-                ?: "data/database.db"
+                ?: "/app/data/database.db"
 
         val databaseFile =
             File(databasePath)
@@ -29,8 +29,11 @@ object DatabaseFactory {
         databaseFile.parentFile?.mkdirs()
 
         println("========================================")
-        println("DATABASE PATH = ${databaseFile.absolutePath}")
+        println("DATABASE PATH ENV = ${System.getenv("DATABASE_PATH")}")
+        println("DATABASE ABSOLUTE PATH = ${databaseFile.absolutePath}")
         println("DATABASE EXISTS = ${databaseFile.exists()}")
+        println("DATABASE SIZE = ${if (databaseFile.exists()) databaseFile.length() else 0}")
+        println("DATABASE PARENT = ${databaseFile.parentFile?.absolutePath}")
         println("========================================")
 
         val config =
