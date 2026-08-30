@@ -14,7 +14,8 @@ class ServerTest {
 
         environment {
             config = MapApplicationConfig(
-                "ktor.environment" to "test"
+                "ktor.environment" to "test",
+                "ktor.database.enabled" to "false"
             )
         }
 

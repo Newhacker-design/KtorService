@@ -9,15 +9,13 @@ import io.ktor.server.netty.*
 
 fun Application.module() {
 
-    val isTest =
-        environment.config
-            .propertyOrNull("ktor.environment")
-            ?.getString() == "test"
-
-    if (!isTest) {
+    if (environment.config.propertyOrNull("ktor.database.enabled")
+            ?.getString() != "false"
+    ) {
         DatabaseFactory.init()
     }
 
     configureSerialization()
+
     configureRouting()
 }
