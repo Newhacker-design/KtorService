@@ -1,9 +1,8 @@
 package com.example.ktorservice.service
 
 import com.example.ktorservice.database.table.AssignmentsTable
+import com.example.ktorservice.database.table.UserAssignmentsTable
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
@@ -12,30 +11,6 @@ import org.jetbrains.exposed.sql.transactions.transaction
 class AssignmentService(
     private val aiService: AIService
 ) {
-
-    /*
-     * ============================================================
-     * CHỐNG NHIỀU REQUEST CÙNG TẠO BÀI
-     * ============================================================
-     *
-     * Ví dụ 100 user cùng yêu cầu:
-     *
-     * grade = 6
-     * subject = Ngữ văn
-     * topic = null
-     *
-     * Chỉ cho 1 request đi gọi Gemini.
-     *
-     * Các request còn lại chờ Mutex rồi lấy bài từ DB.
-     *
-     * Lưu ý:
-     * Mutex này hoạt động trong 1 instance Ktor.
-     * Với Render chạy nhiều instance sau này, ta sẽ bổ sung
-     * cơ chế khóa bằng DB/Redis.
-     */
-
-    private val generationMutex =
-        Mutex()
 
     // ============================================================
     // GET OR GENERATE
@@ -47,39 +22,19 @@ class AssignmentService(
         topic: String? = null
     ): AssignmentResult {
 
-        require(
-            grade in 1..12
-        ) {
+        require(grade in 1..12) {
             "Invalid grade"
         }
 
-        if (subject.isBlank()) {
-            throw IllegalArgumentException(
-                "Subject is required"
-            )
+        require(subject.isNotBlank()) {
+            "Subject is required"
         }
-
-        val normalizedSubject =
-            subject.trim()
-
-        val normalizedTopic =
-            topic
-                ?.trim()
-                ?.takeIf {
-                    it.isNotBlank()
-                }
-
-        /*
-         * --------------------------------------------------------
-         * 1. Kiểm tra DB trước
-         * --------------------------------------------------------
-         */
 
         val existing =
             findExistingAssignment(
                 grade = grade,
-                subject = normalizedSubject,
-                topic = normalizedTopic
+                subject = subject,
+                topic = topic
             )
 
         if (existing != null) {
@@ -87,145 +42,331 @@ class AssignmentService(
             println(
                 "ASSIGNMENT CACHE HIT: " +
                         "grade=$grade " +
-                        "subject=$normalizedSubject " +
-                        "topic=$normalizedTopic " +
+                        "subject=$subject " +
+                        "topic=$topic " +
                         "id=${existing.id}"
             )
 
             return existing
         }
 
-        /*
-         * --------------------------------------------------------
-         * 2. CACHE MISS
-         *
-         * Khóa quá trình tạo bài.
-         * --------------------------------------------------------
-         */
+        println(
+            "ASSIGNMENT CACHE MISS: " +
+                    "grade=$grade " +
+                    "subject=$subject " +
+                    "topic=$topic"
+        )
 
-        return generationMutex.withLock {
+        println("GENERATING NEW ASSIGNMENT WITH AI...")
 
-            /*
-             * Rất quan trọng:
-             *
-             * Trong lúc request hiện tại chờ Mutex,
-             * request khác có thể đã tạo bài rồi.
-             *
-             * Vì vậy phải kiểm tra DB LẦN 2.
-             */
+        val generated =
+            aiService.generateAssignment(
+                grade = grade,
+                subject = subject,
+                topic = topic
+            )
 
-            val existingAfterLock =
-                findExistingAssignment(
-                    grade = grade,
-                    subject = normalizedSubject,
-                    topic = normalizedTopic
-                )
+        val id =
+            withContext(Dispatchers.IO) {
 
-            if (existingAfterLock != null) {
+                transaction {
 
-                println(
-                    "ASSIGNMENT CACHE HIT AFTER LOCK: " +
-                            "grade=$grade " +
-                            "subject=$normalizedSubject " +
-                            "topic=$normalizedTopic " +
-                            "id=${existingAfterLock.id}"
-                )
+                    val statement =
+                        AssignmentsTable.insert {
 
-                return@withLock existingAfterLock
+                            it[AssignmentsTable.grade] =
+                                grade
+
+                            it[AssignmentsTable.subject] =
+                                subject
+
+                            it[AssignmentsTable.topic] =
+                                topic
+
+                            it[AssignmentsTable.title] =
+                                generated.title
+
+                            it[AssignmentsTable.content] =
+                                generated.content
+
+                            it[AssignmentsTable.answerKey] =
+                                generated.answerKey
+
+                            it[AssignmentsTable.gradingGuide] =
+                                generated.gradingGuide
+
+                            it[AssignmentsTable.totalScore] =
+                                generated.totalScore
+
+                            it[AssignmentsTable.createdAt] =
+                                System.currentTimeMillis()
+                        }
+
+                    statement[
+                        AssignmentsTable.id
+                    ]
+                }
             }
 
-            /*
-             * ----------------------------------------------------
-             * 3. Không có bài → gọi Gemini
-             * ----------------------------------------------------
-             */
+        println(
+            "ASSIGNMENT SAVED: id=$id"
+        )
 
-            println(
-                "ASSIGNMENT CACHE MISS: " +
-                        "grade=$grade " +
-                        "subject=$normalizedSubject " +
-                        "topic=$normalizedTopic"
+        return AssignmentResult(
+            id = id,
+            grade = grade,
+            subject = subject,
+            topic = topic,
+            title = generated.title,
+            content = generated.content,
+            answerKey = generated.answerKey,
+            gradingGuide = generated.gradingGuide,
+            totalScore = generated.totalScore
+        )
+    }
+
+    // ============================================================
+    // GET OR CREATE USER ASSIGNMENT
+    // ============================================================
+
+    suspend fun getOrCreateUserAssignment(
+        userId: Int,
+        grade: Int,
+        subject: String,
+        topic: String? = null
+    ): UserAssignmentResult {
+
+        val assignment =
+            getOrGenerateAssignment(
+                grade = grade,
+                subject = subject,
+                topic = topic
             )
 
-            println(
-                "GENERATING NEW ASSIGNMENT WITH AI..."
-            )
+        return withContext(Dispatchers.IO) {
 
-            val generated =
-                aiService.generateAssignment(
-                    grade = grade,
-                    subject = normalizedSubject,
-                    topic = normalizedTopic
-                )
+            transaction {
 
-            /*
-             * ----------------------------------------------------
-             * 4. Lưu DB
-             * ----------------------------------------------------
-             */
+                val existing =
+                    UserAssignmentsTable
+                        .selectAll()
+                        .where {
+                            (UserAssignmentsTable.userId eq userId) and
+                                    (
+                                            UserAssignmentsTable.assignmentId eq
+                                                    assignment.id
+                                            )
+                        }
+                        .firstOrNull()
 
-            val id =
-                withContext(Dispatchers.IO) {
+                if (existing != null) {
 
-                    transaction {
-
-                        val statement =
-                            AssignmentsTable.insert {
-
-                                it[AssignmentsTable.grade] =
-                                    grade
-
-                                it[AssignmentsTable.subject] =
-                                    normalizedSubject
-
-                                it[AssignmentsTable.topic] =
-                                    normalizedTopic
-
-                                it[AssignmentsTable.title] =
-                                    generated.title.trim()
-
-                                it[AssignmentsTable.content] =
-                                    generated.content.trim()
-
-                                it[AssignmentsTable.answerKey] =
-                                    generated.answerKey.trim()
-
-                                it[AssignmentsTable.gradingGuide] =
-                                    generated.gradingGuide.trim()
-
-                                it[AssignmentsTable.totalScore] =
-                                    generated.totalScore
-
-                                it[AssignmentsTable.createdAt] =
-                                    System.currentTimeMillis()
-                            }
-
-                        statement[
-                            AssignmentsTable.id
-                        ]
-                    }
+                    return@transaction rowToUserAssignment(
+                        existing,
+                        assignment
+                    )
                 }
 
-            println(
-                "ASSIGNMENT SAVED: id=$id"
-            )
+                val statement =
+                    UserAssignmentsTable.insert {
 
-            AssignmentResult(
-                id = id,
-                grade = grade,
-                subject = normalizedSubject,
-                topic = normalizedTopic,
-                title = generated.title.trim(),
-                content = generated.content.trim(),
-                answerKey = generated.answerKey.trim(),
-                gradingGuide = generated.gradingGuide.trim(),
-                totalScore = generated.totalScore
-            )
+                        it[UserAssignmentsTable.userId] =
+                            userId
+
+                        it[UserAssignmentsTable.assignmentId] =
+                            assignment.id
+
+                        it[UserAssignmentsTable.status] =
+                            "NEW"
+                    }
+
+                val userAssignmentId =
+                    statement[
+                        UserAssignmentsTable.id
+                    ]
+
+                println(
+                    "USER ASSIGNMENT CREATED: " +
+                            "id=$userAssignmentId " +
+                            "user=$userId " +
+                            "assignment=${assignment.id}"
+                )
+
+                UserAssignmentResult(
+                    id = userAssignmentId,
+                    assignmentId = assignment.id,
+                    userId = userId,
+                    status = "NEW",
+                    answer = null,
+                    score = null,
+                    feedback = null,
+                    startedAt = null,
+                    completedAt = null,
+                    assignment = assignment
+                )
+            }
         }
     }
 
     // ============================================================
-    // FIND EXISTING
+    // GET TODAY / NEXT ASSIGNMENT
+    // ============================================================
+
+    suspend fun getTodayAssignment(
+        userId: Int,
+        grade: Int,
+        subject: String
+    ): UserAssignmentResult {
+
+        return getOrCreateUserAssignment(
+            userId = userId,
+            grade = grade,
+            subject = subject
+        )
+    }
+
+    // ============================================================
+    // GET USER ASSIGNMENT BY ID
+    // ============================================================
+
+    suspend fun getUserAssignment(
+        userId: Int,
+        userAssignmentId: Int
+    ): UserAssignmentResult? {
+
+        return withContext(Dispatchers.IO) {
+
+            transaction {
+
+                val row =
+                    UserAssignmentsTable
+                        .selectAll()
+                        .where {
+                            (UserAssignmentsTable.id eq userAssignmentId) and
+                                    (
+                                            UserAssignmentsTable.userId eq userId
+                                            )
+                        }
+                        .firstOrNull()
+                        ?: return@transaction null
+
+                val assignment =
+                    AssignmentsTable
+                        .selectAll()
+                        .where {
+                            AssignmentsTable.id eq
+                                    row[UserAssignmentsTable.assignmentId]
+                        }
+                        .firstOrNull()
+                        ?.let {
+                            rowToResult(it)
+                        }
+                        ?: return@transaction null
+
+                rowToUserAssignment(
+                    row,
+                    assignment
+                )
+            }
+        }
+    }
+
+    // ============================================================
+    // START ASSIGNMENT
+    // ============================================================
+
+    suspend fun startAssignment(
+        userId: Int,
+        userAssignmentId: Int
+    ): Boolean {
+
+        return withContext(Dispatchers.IO) {
+
+            transaction {
+
+                val row =
+                    UserAssignmentsTable
+                        .selectAll()
+                        .where {
+                            (UserAssignmentsTable.id eq userAssignmentId) and
+                                    (
+                                            UserAssignmentsTable.userId eq userId
+                                            )
+                        }
+                        .firstOrNull()
+                        ?: return@transaction false
+
+                if (
+                    row[UserAssignmentsTable.status] ==
+                    "COMPLETED"
+                ) {
+                    return@transaction true
+                }
+
+                UserAssignmentsTable.update(
+                    where = {
+                        UserAssignmentsTable.id eq
+                                userAssignmentId
+                    }
+                ) {
+
+                    it[status] =
+                        "IN_PROGRESS"
+
+                    if (
+                        row[UserAssignmentsTable.startedAt] == null
+                    ) {
+                        it[startedAt] =
+                            System.currentTimeMillis()
+                    }
+                }
+
+                true
+            }
+        }
+    }
+
+    // ============================================================
+    // SUBMIT ASSIGNMENT
+    // ============================================================
+
+    suspend fun submitAssignment(
+        userId: Int,
+        userAssignmentId: Int,
+        answer: String
+    ): Boolean {
+
+        return withContext(Dispatchers.IO) {
+
+            transaction {
+
+                val updated =
+                    UserAssignmentsTable.update(
+                        where = {
+                            (UserAssignmentsTable.id eq userAssignmentId) and
+                                    (
+                                            UserAssignmentsTable.userId eq userId
+                                            )
+                        }
+                    ) {
+
+                        it[status] =
+                            "COMPLETED"
+
+                        it[UserAssignmentsTable.answer] =
+                            answer
+
+                        it[completedAt] =
+                            System.currentTimeMillis()
+                    }
+
+                updated > 0
+            }
+        }
+    }
+
+    // ============================================================
+    // FIND EXISTING ASSIGNMENT
     // ============================================================
 
     private suspend fun findExistingAssignment(
@@ -290,7 +431,7 @@ class AssignmentService(
     }
 
     // ============================================================
-    // ROW → RESULT
+    // ASSIGNMENT ROW
     // ============================================================
 
     private fun rowToResult(
@@ -329,7 +470,50 @@ class AssignmentService(
     }
 
     // ============================================================
-    // RESULT
+    // USER ASSIGNMENT ROW
+    // ============================================================
+
+    private fun rowToUserAssignment(
+        row: ResultRow,
+        assignment: AssignmentResult
+    ): UserAssignmentResult {
+
+        return UserAssignmentResult(
+
+            id =
+                row[UserAssignmentsTable.id],
+
+            assignmentId =
+                row[UserAssignmentsTable.assignmentId],
+
+            userId =
+                row[UserAssignmentsTable.userId],
+
+            status =
+                row[UserAssignmentsTable.status],
+
+            answer =
+                row[UserAssignmentsTable.answer],
+
+            score =
+                row[UserAssignmentsTable.score],
+
+            feedback =
+                row[UserAssignmentsTable.feedback],
+
+            startedAt =
+                row[UserAssignmentsTable.startedAt],
+
+            completedAt =
+                row[UserAssignmentsTable.completedAt],
+
+            assignment =
+                assignment
+        )
+    }
+
+    // ============================================================
+    // ASSIGNMENT RESULT
     // ============================================================
 
     data class AssignmentResult(
@@ -351,5 +535,32 @@ class AssignmentService(
         val gradingGuide: String,
 
         val totalScore: Double
+    )
+
+    // ============================================================
+    // USER ASSIGNMENT RESULT
+    // ============================================================
+
+    data class UserAssignmentResult(
+
+        val id: Int,
+
+        val assignmentId: Int,
+
+        val userId: Int,
+
+        val status: String,
+
+        val answer: String?,
+
+        val score: Double?,
+
+        val feedback: String?,
+
+        val startedAt: Long?,
+
+        val completedAt: Long?,
+
+        val assignment: AssignmentResult
     )
 }

@@ -17,3 +17,30 @@ data class AssignmentData(
     val gradingGuide: String,
     val totalScore: Double
 )
+@Serializable
+data class UserAssignmentResponse(
+
+    val success: Boolean,
+
+    val id: Int? = null,
+
+    val assignmentId: Int? = null,
+
+    val userId: Int? = null,
+
+    val status: String? = null,
+
+    val answer: String? = null,
+
+    val score: Double? = null,
+
+    val feedback: String? = null,
+
+    val startedAt: Long? = null,
+
+    val completedAt: Long? = null,
+
+    val assignment: AssignmentData? = null,
+
+    val message: String? = null
+)
