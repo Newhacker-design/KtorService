@@ -393,6 +393,29 @@ class AssignmentService(
         // --------------------------------------------------------
 
         println("GRADING ASSIGNMENT WITH AI...")
+        println("========== ASSIGNMENT DATA FOR GRADING ==========")
+
+        println("ASSIGNMENT ID = ${userAssignment.assignment.id}")
+        println("TITLE = ${userAssignment.assignment.title}")
+
+        println("----- CONTENT -----")
+        println(userAssignment.assignment.content)
+
+        println("----- ANSWER KEY -----")
+        println(userAssignment.assignment.answerKey)
+
+        println("----- GRADING GUIDE -----")
+        println(userAssignment.assignment.gradingGuide)
+
+        println("----- TOTAL SCORE -----")
+        println(userAssignment.assignment.totalScore)
+
+        println("----- STUDENT ANSWER -----")
+        println(answer)
+
+        println("=================================================")
+
+        println("GRADING ASSIGNMENT WITH AI...")
 
         val grading =
             aiService.gradeAssignment(
