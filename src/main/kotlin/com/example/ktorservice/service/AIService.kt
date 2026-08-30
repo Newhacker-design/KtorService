@@ -8,11 +8,8 @@ import kotlinx.serialization.json.*
 
 class AIService {
 
-    private val apiKey =
-        System.getenv("GEMINI_API_KEY")
-            ?: throw IllegalStateException(
-                "GEMINI_API_KEY is not configured"
-            )
+    private val apiKey: String?
+        get() = System.getenv("GEMINI_API_KEY")
 
     private val model =
         System.getenv("GEMINI_MODEL")
@@ -42,9 +39,13 @@ class AIService {
             )
 
         return withContext(Dispatchers.IO) {
-
+            val key =
+                apiKey
+                    ?: throw IllegalStateException(
+                        "GEMINI_API_KEY is not configured"
+                    )
             val url =
-                "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey"
+                "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$key"
 
             val connection =
                 java.net.URL(url)
