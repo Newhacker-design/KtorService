@@ -2,6 +2,8 @@ package com.example.ktorservice.service
 
 import com.example.ktorservice.database.table.AssignmentsTable
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
@@ -10,6 +12,30 @@ import org.jetbrains.exposed.sql.transactions.transaction
 class AssignmentService(
     private val aiService: AIService
 ) {
+
+    /*
+     * ============================================================
+     * CHỐNG NHIỀU REQUEST CÙNG TẠO BÀI
+     * ============================================================
+     *
+     * Ví dụ 100 user cùng yêu cầu:
+     *
+     * grade = 6
+     * subject = Ngữ văn
+     * topic = null
+     *
+     * Chỉ cho 1 request đi gọi Gemini.
+     *
+     * Các request còn lại chờ Mutex rồi lấy bài từ DB.
+     *
+     * Lưu ý:
+     * Mutex này hoạt động trong 1 instance Ktor.
+     * Với Render chạy nhiều instance sau này, ta sẽ bổ sung
+     * cơ chế khóa bằng DB/Redis.
+     */
+
+    private val generationMutex =
+        Mutex()
 
     // ============================================================
     // GET OR GENERATE
@@ -33,15 +59,27 @@ class AssignmentService(
             )
         }
 
-        // --------------------------------------------------------
-        // 1. Tìm bài đã có trong DB
-        // --------------------------------------------------------
+        val normalizedSubject =
+            subject.trim()
+
+        val normalizedTopic =
+            topic
+                ?.trim()
+                ?.takeIf {
+                    it.isNotBlank()
+                }
+
+        /*
+         * --------------------------------------------------------
+         * 1. Kiểm tra DB trước
+         * --------------------------------------------------------
+         */
 
         val existing =
             findExistingAssignment(
                 grade = grade,
-                subject = subject,
-                topic = topic
+                subject = normalizedSubject,
+                topic = normalizedTopic
             )
 
         if (existing != null) {
@@ -49,88 +87,141 @@ class AssignmentService(
             println(
                 "ASSIGNMENT CACHE HIT: " +
                         "grade=$grade " +
-                        "subject=$subject " +
-                        "topic=$topic"
+                        "subject=$normalizedSubject " +
+                        "topic=$normalizedTopic " +
+                        "id=${existing.id}"
             )
 
             return existing
         }
 
-        // --------------------------------------------------------
-        // 2. Chưa có → gọi AI
-        // --------------------------------------------------------
+        /*
+         * --------------------------------------------------------
+         * 2. CACHE MISS
+         *
+         * Khóa quá trình tạo bài.
+         * --------------------------------------------------------
+         */
 
-        println(
-            "ASSIGNMENT CACHE MISS: " +
-                    "grade=$grade " +
-                    "subject=$subject " +
-                    "topic=$topic"
-        )
+        return generationMutex.withLock {
 
-        val generated =
-            aiService.generateAssignment(
-                grade = grade,
-                subject = subject,
-                topic = topic
-            )
+            /*
+             * Rất quan trọng:
+             *
+             * Trong lúc request hiện tại chờ Mutex,
+             * request khác có thể đã tạo bài rồi.
+             *
+             * Vì vậy phải kiểm tra DB LẦN 2.
+             */
 
-        // --------------------------------------------------------
-        // 3. Lưu DB
-        // --------------------------------------------------------
+            val existingAfterLock =
+                findExistingAssignment(
+                    grade = grade,
+                    subject = normalizedSubject,
+                    topic = normalizedTopic
+                )
 
-        val id =
-            withContext(Dispatchers.IO) {
+            if (existingAfterLock != null) {
 
-                transaction {
+                println(
+                    "ASSIGNMENT CACHE HIT AFTER LOCK: " +
+                            "grade=$grade " +
+                            "subject=$normalizedSubject " +
+                            "topic=$normalizedTopic " +
+                            "id=${existingAfterLock.id}"
+                )
 
-                    val statement =
-                        AssignmentsTable.insert {
-
-                            it[AssignmentsTable.grade] =
-                                grade
-
-                            it[AssignmentsTable.subject] =
-                                subject
-
-                            it[AssignmentsTable.topic] =
-                                topic
-
-                            it[AssignmentsTable.title] =
-                                generated.title
-
-                            it[AssignmentsTable.content] =
-                                generated.content
-
-                            it[AssignmentsTable.answerKey] =
-                                generated.answerKey
-
-                            it[AssignmentsTable.gradingGuide] =
-                                generated.gradingGuide
-
-                            it[AssignmentsTable.totalScore] =
-                                generated.totalScore
-
-                            it[AssignmentsTable.createdAt] =
-                                System.currentTimeMillis()
-                        }
-
-                    statement[
-                        AssignmentsTable.id
-                    ]
-                }
+                return@withLock existingAfterLock
             }
 
-        return AssignmentResult(
-            id = id,
-            grade = grade,
-            subject = subject,
-            topic = topic,
-            title = generated.title,
-            content = generated.content,
-            answerKey = generated.answerKey,
-            gradingGuide = generated.gradingGuide,
-            totalScore = generated.totalScore
-        )
+            /*
+             * ----------------------------------------------------
+             * 3. Không có bài → gọi Gemini
+             * ----------------------------------------------------
+             */
+
+            println(
+                "ASSIGNMENT CACHE MISS: " +
+                        "grade=$grade " +
+                        "subject=$normalizedSubject " +
+                        "topic=$normalizedTopic"
+            )
+
+            println(
+                "GENERATING NEW ASSIGNMENT WITH AI..."
+            )
+
+            val generated =
+                aiService.generateAssignment(
+                    grade = grade,
+                    subject = normalizedSubject,
+                    topic = normalizedTopic
+                )
+
+            /*
+             * ----------------------------------------------------
+             * 4. Lưu DB
+             * ----------------------------------------------------
+             */
+
+            val id =
+                withContext(Dispatchers.IO) {
+
+                    transaction {
+
+                        val statement =
+                            AssignmentsTable.insert {
+
+                                it[AssignmentsTable.grade] =
+                                    grade
+
+                                it[AssignmentsTable.subject] =
+                                    normalizedSubject
+
+                                it[AssignmentsTable.topic] =
+                                    normalizedTopic
+
+                                it[AssignmentsTable.title] =
+                                    generated.title.trim()
+
+                                it[AssignmentsTable.content] =
+                                    generated.content.trim()
+
+                                it[AssignmentsTable.answerKey] =
+                                    generated.answerKey.trim()
+
+                                it[AssignmentsTable.gradingGuide] =
+                                    generated.gradingGuide.trim()
+
+                                it[AssignmentsTable.totalScore] =
+                                    generated.totalScore
+
+                                it[AssignmentsTable.createdAt] =
+                                    System.currentTimeMillis()
+                            }
+
+                        statement[
+                            AssignmentsTable.id
+                        ]
+                    }
+                }
+
+            println(
+                "ASSIGNMENT SAVED: id=$id"
+            )
+
+            AssignmentResult(
+                id = id,
+                grade = grade,
+                subject = normalizedSubject,
+                topic = normalizedTopic,
+                title = generated.title.trim(),
+                content = generated.content.trim(),
+                answerKey = generated.answerKey.trim(),
+                gradingGuide = generated.gradingGuide.trim(),
+                totalScore = generated.totalScore
+            )
+        }
     }
 
     // ============================================================
