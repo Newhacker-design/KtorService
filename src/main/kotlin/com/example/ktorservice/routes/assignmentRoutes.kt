@@ -1,12 +1,15 @@
 package com.example.ktorservice.routes
 
+import com.example.ktorservice.model.AssignmentActionResponse
 import com.example.ktorservice.model.AssignmentData
 import com.example.ktorservice.model.AssignmentGenerateResponse
+import com.example.ktorservice.model.AssignmentSubmitRequest
 import com.example.ktorservice.model.UserAssignmentResponse
 import com.example.ktorservice.security.requireUserId
 import com.example.ktorservice.service.AssignmentService
 import com.example.ktorservice.service.AuthService
 import io.ktor.http.HttpStatusCode
+import io.ktor.server.request.receive
 import io.ktor.server.response.respond
 import io.ktor.server.routing.*
 
@@ -240,6 +243,207 @@ fun Route.assignmentRoutes(
                             e.message
                                 ?: "Unknown error"
                             )
+                )
+            )
+        }
+    }
+    post("/assignments/{id}/start") {
+
+        try {
+
+            val userId =
+                call.requireUserId(authService)
+
+            if (userId == null) {
+
+                call.respond(
+                    HttpStatusCode.Unauthorized,
+                    AssignmentActionResponse(
+                        success = false,
+                        message = "Invalid or expired token"
+                    )
+                )
+
+                return@post
+            }
+
+            val id =
+                call.parameters["id"]
+                    ?.toIntOrNull()
+
+            if (id == null) {
+
+                call.respond(
+                    HttpStatusCode.BadRequest,
+                    AssignmentActionResponse(
+                        success = false,
+                        message = "Invalid assignment id"
+                    )
+                )
+
+                return@post
+            }
+
+            println(
+                "========== START ASSIGNMENT =========="
+            )
+
+            println("USER ID = $userId")
+            println("USER ASSIGNMENT ID = $id")
+
+            val result =
+                assignmentService.startAssignment(
+                    userId = userId,
+                    userAssignmentId = id
+                )
+
+            if (!result) {
+
+                call.respond(
+                    HttpStatusCode.NotFound,
+                    AssignmentActionResponse(
+                        success = false,
+                        message = "Assignment not found"
+                    )
+                )
+
+                return@post
+            }
+
+            call.respond(
+                HttpStatusCode.OK,
+                AssignmentActionResponse(
+                    success = true,
+                    status = "IN_PROGRESS",
+                    message = "Assignment started"
+                )
+            )
+
+        } catch (e: Exception) {
+
+            println(
+                "========== START ASSIGNMENT ERROR =========="
+            )
+
+            e.printStackTrace()
+
+            call.respond(
+                HttpStatusCode.InternalServerError,
+                AssignmentActionResponse(
+                    success = false,
+                    message =
+                        e.message
+                            ?: "Unknown error"
+                )
+            )
+        }
+    }
+    post("/assignments/{id}/submit") {
+
+        try {
+
+            val userId =
+                call.requireUserId(authService)
+
+            if (userId == null) {
+
+                call.respond(
+                    HttpStatusCode.Unauthorized,
+                    AssignmentActionResponse(
+                        success = false,
+                        message = "Invalid or expired token"
+                    )
+                )
+
+                return@post
+            }
+
+            val id =
+                call.parameters["id"]
+                    ?.toIntOrNull()
+
+            if (id == null) {
+
+                call.respond(
+                    HttpStatusCode.BadRequest,
+                    AssignmentActionResponse(
+                        success = false,
+                        message = "Invalid assignment id"
+                    )
+                )
+
+                return@post
+            }
+
+            val request =
+                call.receive<AssignmentSubmitRequest>()
+
+            if (request.answer.isBlank()) {
+
+                call.respond(
+                    HttpStatusCode.BadRequest,
+                    AssignmentActionResponse(
+                        success = false,
+                        message = "Answer is required"
+                    )
+                )
+
+                return@post
+            }
+
+            println(
+                "========== SUBMIT ASSIGNMENT =========="
+            )
+
+            println("USER ID = $userId")
+            println("USER ASSIGNMENT ID = $id")
+
+            val result =
+                assignmentService.submitAssignment(
+                    userId = userId,
+                    userAssignmentId = id,
+                    answer = request.answer
+                )
+
+            if (result == null) {
+
+                call.respond(
+                    HttpStatusCode.NotFound,
+                    AssignmentActionResponse(
+                        success = false,
+                        message = "Assignment not found"
+                    )
+                )
+
+                return@post
+            }
+
+            call.respond(
+                HttpStatusCode.OK,
+                AssignmentActionResponse(
+                    success = true,
+                    status = result.status,
+                    score = result.score,
+                    feedback = result.feedback,
+                    message = "Assignment submitted successfully"
+                )
+            )
+
+        } catch (e: Exception) {
+
+            println(
+                "========== SUBMIT ASSIGNMENT ERROR =========="
+            )
+
+            e.printStackTrace()
+
+            call.respond(
+                HttpStatusCode.InternalServerError,
+                AssignmentActionResponse(
+                    success = false,
+                    message =
+                        e.message
+                            ?: "Unknown error"
                 )
             )
         }

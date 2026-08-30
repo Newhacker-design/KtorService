@@ -334,35 +334,81 @@ class AssignmentService(
         userId: Int,
         userAssignmentId: Int,
         answer: String
-    ): Boolean {
+    ): UserAssignmentResult? {
 
-        return withContext(Dispatchers.IO) {
+        if (answer.isBlank()) {
+            throw IllegalArgumentException("Answer is required")
+        }
+
+        val userAssignment =
+            getUserAssignment(
+                userId = userId,
+                userAssignmentId = userAssignmentId
+            )
+                ?: return null
+
+        if (userAssignment.status == "COMPLETED") {
+            return userAssignment
+        }
+
+        println("========== SUBMIT ASSIGNMENT ==========")
+        println("USER ID = $userId")
+        println("USER ASSIGNMENT ID = $userAssignmentId")
+        println("ASSIGNMENT ID = ${userAssignment.assignmentId}")
+
+        // --------------------------------------------------------
+        // Gọi Gemini để chấm
+        // --------------------------------------------------------
+
+        println("GRADING ASSIGNMENT WITH AI...")
+
+        val grading =
+            aiService.gradeAssignment(
+                assignment = userAssignment.assignment,
+                studentAnswer = answer
+            )
+
+        println(
+            "AI GRADE = ${grading.score}"
+        )
+
+        // --------------------------------------------------------
+        // Lưu kết quả
+        // --------------------------------------------------------
+
+        withContext(Dispatchers.IO) {
 
             transaction {
 
-                val updated =
-                    UserAssignmentsTable.update(
-                        where = {
-                            (UserAssignmentsTable.id eq userAssignmentId) and
-                                    (
-                                            UserAssignmentsTable.userId eq userId
-                                            )
-                        }
-                    ) {
-
-                        it[status] =
-                            "COMPLETED"
-
-                        it[UserAssignmentsTable.answer] =
-                            answer
-
-                        it[completedAt] =
-                            System.currentTimeMillis()
+                UserAssignmentsTable.update(
+                    where = {
+                        (UserAssignmentsTable.id eq userAssignmentId) and
+                                (UserAssignmentsTable.userId eq userId)
                     }
+                ) {
 
-                updated > 0
+                    it[status] =
+                        "COMPLETED"
+
+                    it[UserAssignmentsTable.answer] =
+                        answer
+
+                    it[UserAssignmentsTable.score] =
+                        grading.score
+
+                    it[UserAssignmentsTable.feedback] =
+                        grading.feedback
+
+                    it[completedAt] =
+                        System.currentTimeMillis()
+                }
             }
         }
+
+        return getUserAssignment(
+            userId = userId,
+            userAssignmentId = userAssignmentId
+        )
     }
 
     // ============================================================

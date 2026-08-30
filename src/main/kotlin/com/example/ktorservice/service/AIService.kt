@@ -482,5 +482,285 @@ class AIService {
 
         val totalScore: Double
     )
+    @Serializable
+    data class GradingResult(
+        val score: Double,
+        val feedback: String
+    )
+    suspend fun gradeAssignment(
+        assignment: AssignmentService.AssignmentResult,
+        studentAnswer: String
+    ): GradingResult {
+
+        val prompt =
+            buildGradingPrompt(
+                assignment = assignment,
+                studentAnswer = studentAnswer
+            )
+
+        return withContext(Dispatchers.IO) {
+
+            val key =
+                apiKey
+                    ?: throw IllegalStateException(
+                        "GEMINI_API_KEY is not configured"
+                    )
+
+            val url =
+                "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$key"
+
+            val connection =
+                java.net.URL(url)
+                    .openConnection()
+                        as java.net.HttpURLConnection
+
+            try {
+
+                connection.requestMethod =
+                    "POST"
+
+                connection.setRequestProperty(
+                    "Content-Type",
+                    "application/json"
+                )
+
+                connection.connectTimeout =
+                    15_000
+
+                connection.readTimeout =
+                    60_000
+
+                connection.doOutput =
+                    true
+
+                val requestBody =
+                    buildJsonObject {
+
+                        put(
+                            "contents",
+                            buildJsonArray {
+
+                                add(
+                                    buildJsonObject {
+
+                                        put(
+                                            "parts",
+                                            buildJsonArray {
+
+                                                add(
+                                                    buildJsonObject {
+                                                        put(
+                                                            "text",
+                                                            prompt
+                                                        )
+                                                    }
+                                                )
+                                            }
+                                        )
+                                    }
+                                )
+                            }
+                        )
+
+                        put(
+                            "generationConfig",
+                            buildJsonObject {
+
+                                put(
+                                    "temperature",
+                                    0.2
+                                )
+
+                                put(
+                                    "responseMimeType",
+                                    "application/json"
+                                )
+                            }
+                        )
+                    }
+
+                connection.outputStream
+                    .bufferedWriter()
+                    .use {
+                        it.write(
+                            requestBody.toString()
+                        )
+                    }
+
+                val responseCode =
+                    connection.responseCode
+
+                val responseText =
+                    if (responseCode in 200..299) {
+
+                        connection.inputStream
+                            .bufferedReader()
+                            .use {
+                                it.readText()
+                            }
+
+                    } else {
+
+                        connection.errorStream
+                            ?.bufferedReader()
+                            ?.use {
+                                it.readText()
+                            }
+                            ?: "Unknown Gemini error"
+                    }
+
+                println(
+                    "GEMINI GRADING HTTP CODE = $responseCode"
+                )
+
+                if (responseCode !in 200..299) {
+
+                    throw IllegalStateException(
+                        "Gemini grading error $responseCode: $responseText"
+                    )
+                }
+
+                parseGradingResponse(
+                    responseText
+                )
+
+            } finally {
+
+                connection.disconnect()
+            }
+        }
+    }
+    private fun buildGradingPrompt(
+        assignment: AssignmentService.AssignmentResult,
+        studentAnswer: String
+    ): String {
+
+        return """
+        Bạn là giáo viên Việt Nam đang chấm bài cho học sinh.
+
+        THÔNG TIN BÀI TẬP
+
+        Môn: ${assignment.subject}
+        Lớp: ${assignment.grade}
+        Tiêu đề: ${assignment.title}
+
+        NỘI DUNG BÀI TẬP:
+
+        ${assignment.content}
+
+        ĐÁP ÁN CHUẨN:
+
+        ${assignment.answerKey}
+
+        HƯỚNG DẪN CHẤM:
+
+        ${assignment.gradingGuide}
+
+        TỔNG ĐIỂM:
+
+        ${assignment.totalScore}
+
+        BÀI LÀM CỦA HỌC SINH:
+
+        $studentAnswer
+
+        Hãy chấm bài làm của học sinh.
+
+        Yêu cầu:
+
+        1. Chấm công bằng dựa trên đáp án và hướng dẫn chấm.
+        2. Không tự ý thay đổi thang điểm.
+        3. Điểm tối đa là ${assignment.totalScore}.
+        4. Có thể cho điểm lẻ.
+        5. Nếu học sinh trả lời đúng nhưng diễn đạt khác đáp án mẫu,
+           vẫn phải xem xét cho điểm nếu nội dung chính xác.
+        6. Nếu bài làm thiếu ý, phải trừ điểm tương ứng.
+        7. Feedback phải ngắn gọn, dễ hiểu với học sinh lớp ${assignment.grade}.
+        8. Không bịa thông tin.
+
+        Chỉ trả về JSON hợp lệ:
+
+        {
+          "score": 8.5,
+          "feedback": "Bài làm tốt. Em đã trả lời đúng các ý chính..."
+        }
+
+        Không thêm markdown.
+        Không thêm ```json.
+        Không giải thích bên ngoài JSON.
+    """.trimIndent()
+    }
+    private fun parseGradingResponse(
+        responseText: String
+    ): GradingResult {
+
+        val root =
+            json.parseToJsonElement(
+                responseText
+            ).jsonObject
+
+        val candidates =
+            root["candidates"]
+                ?.jsonArray
+                ?: throw IllegalStateException(
+                    "Gemini grading response has no candidates"
+                )
+
+        val firstCandidate =
+            candidates.firstOrNull()
+                ?.jsonObject
+                ?: throw IllegalStateException(
+                    "Gemini grading returned no candidate"
+                )
+
+        val content =
+            firstCandidate["content"]
+                ?.jsonObject
+                ?: throw IllegalStateException(
+                    "Gemini grading response has no content"
+                )
+
+        val parts =
+            content["parts"]
+                ?.jsonArray
+                ?: throw IllegalStateException(
+                    "Gemini grading response has no parts"
+                )
+
+        val text =
+            parts
+                .firstOrNull()
+                ?.jsonObject
+                ?.get("text")
+                ?.jsonPrimitive
+                ?.content
+                ?: throw IllegalStateException(
+                    "Gemini grading response has no text"
+                )
+
+        val result =
+            json.parseToJsonElement(
+                text.trim()
+            ).jsonObject
+
+        val score =
+            result["score"]
+                ?.jsonPrimitive
+                ?.doubleOrNull
+                ?: throw IllegalStateException(
+                    "Gemini grading response has no score"
+                )
+
+        val feedback =
+            result["feedback"]
+                ?.jsonPrimitive
+                ?.content
+                ?: ""
+
+        return GradingResult(
+            score = score,
+            feedback = feedback
+        )
+    }
 }
 

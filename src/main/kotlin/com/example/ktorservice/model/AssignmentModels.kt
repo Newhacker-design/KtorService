@@ -44,3 +44,16 @@ data class UserAssignmentResponse(
 
     val message: String? = null
 )
+@Serializable
+data class AssignmentSubmitRequest(
+    val answer: String
+)
+
+@Serializable
+data class AssignmentActionResponse(
+    val success: Boolean,
+    val message: String? = null,
+    val status: String? = null,
+    val score: Double? = null,
+    val feedback: String? = null
+)
