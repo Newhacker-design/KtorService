@@ -238,30 +238,62 @@ class AssignmentService(
 
             transaction {
 
+                println("========== GET USER ASSIGNMENT ==========")
+                println("USER ID = $userId")
+                println("USER ASSIGNMENT ID = $userAssignmentId")
+
                 val row =
                     UserAssignmentsTable
                         .selectAll()
                         .where {
                             (UserAssignmentsTable.id eq userAssignmentId) and
-                                    (
-                                            UserAssignmentsTable.userId eq userId
-                                            )
+                                    (UserAssignmentsTable.userId eq userId)
                         }
                         .firstOrNull()
-                        ?: return@transaction null
 
-                val assignment =
+                if (row == null) {
+
+                    println("USER ASSIGNMENT NOT FOUND")
+                    println(
+                        "Looking for UserAssignmentsTable.id=$userAssignmentId " +
+                                "AND userId=$userId"
+                    )
+
+                    return@transaction null
+                }
+
+                val assignmentId =
+                    row[UserAssignmentsTable.assignmentId]
+
+                println("USER ASSIGNMENT FOUND")
+                println("USER ASSIGNMENT ID = ${row[UserAssignmentsTable.id]}")
+                println("USER ID = ${row[UserAssignmentsTable.userId]}")
+                println("ASSIGNMENT ID = $assignmentId")
+                println("STATUS = ${row[UserAssignmentsTable.status]}")
+
+                val assignmentRow =
                     AssignmentsTable
                         .selectAll()
                         .where {
-                            AssignmentsTable.id eq
-                                    row[UserAssignmentsTable.assignmentId]
+                            AssignmentsTable.id eq assignmentId
                         }
                         .firstOrNull()
-                        ?.let {
-                            rowToResult(it)
-                        }
-                        ?: return@transaction null
+
+                if (assignmentRow == null) {
+
+                    println("ASSIGNMENT NOT FOUND")
+                    println(
+                        "Looking for AssignmentsTable.id=$assignmentId"
+                    )
+
+                    return@transaction null
+                }
+
+                val assignment =
+                    rowToResult(assignmentRow)
+
+                println("ASSIGNMENT FOUND")
+                println("TITLE = ${assignment.title}")
 
                 rowToUserAssignment(
                     row,
