@@ -3,10 +3,13 @@ package com.example.ktorservice.plugins
 import com.example.ktorservice.database.dao.ViewedItemDaoImpl
 import com.example.ktorservice.repository.LocationRepository
 import com.example.ktorservice.repository.ViewedItemRepository
+import com.example.ktorservice.routes.assignmentRoutes
 import com.example.ktorservice.routes.authRoutes
 import com.example.ktorservice.routes.deviceRoutes
 import com.example.ktorservice.routes.licenseRoutes
 import com.example.ktorservice.routes.viewedItemRoutes
+import com.example.ktorservice.service.AIService
+import com.example.ktorservice.service.AssignmentService
 import io.ktor.server.application.Application
 import io.ktor.server.response.respondText
 import io.ktor.server.routing.get
@@ -21,13 +24,28 @@ fun Application.configureRouting() {
         ViewedItemRepository(
             ViewedItemDaoImpl()
         )
-    val authService = AuthService()
-    val deviceService = DeviceService()
-    val licenseService = LicenseService()
+
+    val authService =
+        AuthService()
+
+    val deviceService =
+        DeviceService()
+
+    val licenseService =
+        LicenseService()
+
+    val aiService =
+        AIService()
+
+    val assignmentService =
+        AssignmentService(
+            aiService
+        )
 
     routing {
 
         get("/") {
+
             call.respondText(
                 "Ktor Server is running"
             )
@@ -35,7 +53,8 @@ fun Application.configureRouting() {
 
         viewedItemRoutes(
             viewedItemRepository,
-            locationRepository = LocationRepository()
+            locationRepository =
+                LocationRepository()
         )
 
         authRoutes(
@@ -50,6 +69,11 @@ fun Application.configureRouting() {
         licenseRoutes(
             authService,
             licenseService
+        )
+
+        assignmentRoutes(
+            authService,
+            assignmentService
         )
     }
 }
