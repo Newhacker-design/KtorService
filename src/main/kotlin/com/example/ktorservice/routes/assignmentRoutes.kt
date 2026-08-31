@@ -375,17 +375,14 @@ fun Route.assignmentRoutes(
                 return@get
             }
 
-            println(
-                "========== GET ASSIGNMENT FROM STORAGE =========="
-            )
-
+            println("========== GET ASSIGNMENT ==========")
             println("USER ID = $userId")
             println("ASSIGNMENT ID = $id")
 
-            val result =
+            val assignment =
                 assignmentService.getById(id)
 
-            if (result == null) {
+            if (assignment == null) {
 
                 println("ASSIGNMENT NOT FOUND")
 
@@ -401,23 +398,21 @@ fun Route.assignmentRoutes(
             }
 
             println("ASSIGNMENT FOUND")
-            println("ID = ${result.id}")
-            println("GRADE = ${result.grade}")
-            println("SUBJECT = ${result.subject}")
-            println("TITLE = ${result.title}")
+            println("ASSIGNMENT ID = ${assignment.id}")
+            println("TITLE = ${assignment.title}")
 
             call.respond(
                 HttpStatusCode.OK,
                 AssignmentDetailResponse(
                     success = true,
                     assignment = AssignmentStudentData(
-                        id = result.id,
-                        grade = result.grade,
-                        subject = result.subject,
-                        topic = result.topic,
-                        title = result.title,
-                        content = result.content,
-                        totalScore = result.totalScore
+                        id = assignment.id,
+                        grade = assignment.grade,
+                        subject = assignment.subject,
+                        topic = assignment.topic,
+                        title = assignment.title,
+                        content = assignment.content,
+                        totalScore = assignment.totalScore
                     )
                 )
             )
