@@ -3,7 +3,9 @@ set -e
 
 TAILSCALE_SOCKET="/var/run/tailscale/tailscaled.sock"
 TAILSCALE_STATE="/var/lib/tailscale/tailscaled.state"
-TAILSCALE_HOSTNAME="ktorservice-render"
+
+DB_HOST="${DB_HOST:-100.76.246.38}"
+DB_PORT="${DB_PORT:-5432}"
 
 echo "========================================"
 echo "Starting Tailscale..."
@@ -12,61 +14,22 @@ echo "========================================"
 mkdir -p /var/run/tailscale
 mkdir -p /var/lib/tailscale
 
+
+# ==================================================
+# Check auth key
+# ==================================================
+
 if [ -z "$TS_AUTHKEY" ]; then
     echo "ERROR: TS_AUTHKEY is not set"
     exit 1
 fi
 
-if [ -z "$TS_API_KEY" ]; then
-    echo "ERROR: TS_API_KEY is not set"
-    exit 1
-fi
 
-echo "========================================"
-echo "Cleaning old Tailscale nodes..."
-echo "========================================"
+# ==================================================
+# Start tailscaled
+# ==================================================
 
-# Lấy danh sách tất cả devices trong tailnet
-DEVICES_JSON=$(curl -fsS \
-    -u "${TS_API_KEY}:" \
-    "https://api.tailscale.com/api/v2/tailnet/-/devices")
-
-if [ -z "$DEVICES_JSON" ]; then
-    echo "WARNING: Could not get Tailscale device list"
-else
-    echo "$DEVICES_JSON" |
-    python3 -c '
-import sys
-import json
-
-data = json.load(sys.stdin)
-
-for device in data.get("devices", []):
-    name = device.get("name", "")
-    device_id = device.get("id", "")
-
-    if name.startswith("ktorservice-render"):
-        print(device_id)
-    ' |
-    while read -r DEVICE_ID; do
-
-        if [ -n "$DEVICE_ID" ]; then
-            echo "Removing old device: $DEVICE_ID"
-
-            curl -fsS -X DELETE \
-                -u "${TS_API_KEY}:" \
-                "https://api.tailscale.com/api/v2/device/${DEVICE_ID}" \
-                || echo "WARNING: Failed to remove device ${DEVICE_ID}"
-
-            sleep 1
-        fi
-
-    done
-fi
-
-echo "========================================"
 echo "Starting tailscaled..."
-echo "========================================"
 
 tailscaled \
     --tun=userspace-networking \
@@ -75,12 +38,20 @@ tailscaled \
 
 TAILSCALED_PID=$!
 
+
+# ==================================================
+# Wait for socket
+# ==================================================
+
 echo "Waiting for tailscaled socket..."
+
+SOCKET_READY=false
 
 for i in $(seq 1 30); do
 
     if [ -S "$TAILSCALE_SOCKET" ]; then
         echo "tailscaled socket is ready"
+        SOCKET_READY=true
         break
     fi
 
@@ -92,10 +63,15 @@ for i in $(seq 1 30); do
     sleep 1
 done
 
-if [ ! -S "$TAILSCALE_SOCKET" ]; then
+if [ "$SOCKET_READY" != "true" ]; then
     echo "ERROR: tailscaled socket was not created"
     exit 1
 fi
+
+
+# ==================================================
+# Connect Tailscale
+# ==================================================
 
 echo "========================================"
 echo "Connecting to Tailscale..."
@@ -105,8 +81,48 @@ tailscale \
     --socket="$TAILSCALE_SOCKET" \
     up \
     --auth-key="$TS_AUTHKEY" \
-    --hostname="$TAILSCALE_HOSTNAME" \
-    --reset
+    --hostname="ktorservice-render" \
+    --accept-dns=false
+
+
+# ==================================================
+# Wait for Tailscale Running
+# ==================================================
+
+echo "========================================"
+echo "Waiting for Tailscale..."
+echo "========================================"
+
+TS_RUNNING=false
+
+for i in $(seq 1 30); do
+
+    STATUS=$(
+        tailscale \
+            --socket="$TAILSCALE_SOCKET" \
+            status 2>/dev/null || true
+    )
+
+    echo "$STATUS"
+
+    if echo "$STATUS" | grep -q "ktorservice-render"; then
+        TS_RUNNING=true
+        echo "Tailscale is connected"
+        break
+    fi
+
+    sleep 1
+done
+
+if [ "$TS_RUNNING" != "true" ]; then
+    echo "ERROR: Tailscale did not connect"
+    exit 1
+fi
+
+
+# ==================================================
+# Show Tailscale status
+# ==================================================
 
 echo "========================================"
 echo "Tailscale connected"
@@ -115,6 +131,54 @@ echo "========================================"
 tailscale \
     --socket="$TAILSCALE_SOCKET" \
     status
+
+
+# ==================================================
+# Wait for PostgreSQL
+# ==================================================
+
+echo "========================================"
+echo "Checking PostgreSQL..."
+echo "========================================"
+
+echo "DATABASE HOST = $DB_HOST"
+echo "DATABASE PORT = $DB_PORT"
+
+DB_READY=false
+
+for i in $(seq 1 60); do
+
+    if nc -z -w 2 "$DB_HOST" "$DB_PORT" 2>/dev/null; then
+        echo "PostgreSQL is reachable!"
+        DB_READY=true
+        break
+    fi
+
+    echo "Waiting for PostgreSQL... attempt $i/60"
+
+    sleep 2
+done
+
+
+if [ "$DB_READY" != "true" ]; then
+
+    echo "========================================"
+    echo "ERROR: PostgreSQL is NOT reachable"
+    echo "========================================"
+
+    echo "Testing Tailscale connection..."
+
+    tailscale \
+        --socket="$TAILSCALE_SOCKET" \
+        ping "$DB_HOST" || true
+
+    exit 1
+fi
+
+
+# ==================================================
+# Start Ktor
+# ==================================================
 
 echo "========================================"
 echo "Starting Ktor..."
@@ -128,4 +192,6 @@ ls -lh /app/build/libs/KtorService-all.jar
 
 echo "STARTING JAVA..."
 
-exec java -jar /app/build/libs/KtorService-all.jar
+exec java \
+    --enable-native-access=ALL-UNNAMED \
+    -jar /app/build/libs/KtorService-all.jar
