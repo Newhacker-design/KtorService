@@ -2,6 +2,7 @@ package com.example.ktorservice.routes
 
 import com.example.ktorservice.model.AssignmentActionResponse
 import com.example.ktorservice.model.AssignmentData
+import com.example.ktorservice.model.AssignmentDetailResponse
 import com.example.ktorservice.model.AssignmentGenerateResponse
 import com.example.ktorservice.model.AssignmentListResponse
 import com.example.ktorservice.model.AssignmentStorageData
@@ -348,7 +349,7 @@ fun Route.assignmentRoutes(
 
                 call.respond(
                     HttpStatusCode.Unauthorized,
-                    AssignmentGenerateResponse(
+                    AssignmentDetailResponse(
                         success = false,
                         message = "Invalid or expired token"
                     )
@@ -365,7 +366,7 @@ fun Route.assignmentRoutes(
 
                 call.respond(
                     HttpStatusCode.BadRequest,
-                    AssignmentGenerateResponse(
+                    AssignmentDetailResponse(
                         success = false,
                         message = "Invalid assignment id"
                     )
@@ -375,7 +376,7 @@ fun Route.assignmentRoutes(
             }
 
             println(
-                "========== GET ASSIGNMENT BY ID =========="
+                "========== GET ASSIGNMENT FROM STORAGE =========="
             )
 
             println("USER ID = $userId")
@@ -386,9 +387,11 @@ fun Route.assignmentRoutes(
 
             if (result == null) {
 
+                println("ASSIGNMENT NOT FOUND")
+
                 call.respond(
                     HttpStatusCode.NotFound,
-                    AssignmentGenerateResponse(
+                    AssignmentDetailResponse(
                         success = false,
                         message = "Assignment not found"
                     )
@@ -397,15 +400,23 @@ fun Route.assignmentRoutes(
                 return@get
             }
 
+            println("ASSIGNMENT FOUND")
+            println("ID = ${result.id}")
+            println("GRADE = ${result.grade}")
+            println("SUBJECT = ${result.subject}")
+            println("TITLE = ${result.title}")
+
             call.respond(
                 HttpStatusCode.OK,
-                AssignmentGenerateResponse(
+                AssignmentDetailResponse(
                     success = true,
-                    assignment = AssignmentData(
+                    assignment = AssignmentStudentData(
+                        id = result.id,
+                        grade = result.grade,
+                        subject = result.subject,
+                        topic = result.topic,
                         title = result.title,
                         content = result.content,
-                        answerKey = result.answerKey,
-                        gradingGuide = result.gradingGuide,
                         totalScore = result.totalScore
                     )
                 )
@@ -414,14 +425,14 @@ fun Route.assignmentRoutes(
         } catch (e: Exception) {
 
             println(
-                "========== GET ASSIGNMENT BY ID ERROR =========="
+                "========== GET ASSIGNMENT ERROR =========="
             )
 
             e.printStackTrace()
 
             call.respond(
                 HttpStatusCode.InternalServerError,
-                AssignmentGenerateResponse(
+                AssignmentDetailResponse(
                     success = false,
                     message =
                         e.message

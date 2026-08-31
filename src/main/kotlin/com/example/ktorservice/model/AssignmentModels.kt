@@ -28,6 +28,12 @@ data class AssignmentStudentData(
     val totalScore: Double
 )
 @Serializable
+data class AssignmentDetailResponse(
+    val success: Boolean,
+    val assignment: AssignmentStudentData? = null,
+    val message: String? = null
+)
+@Serializable
 data class UserAssignmentResponse(
 
     val success: Boolean,
