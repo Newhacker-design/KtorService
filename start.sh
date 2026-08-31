@@ -33,6 +33,7 @@ echo "Starting tailscaled..."
 
 tailscaled \
     --tun=userspace-networking \
+    --socks5-server=127.0.0.1:1055 \
     --state="$TAILSCALE_STATE" \
     --socket="$TAILSCALE_SOCKET" &
 
