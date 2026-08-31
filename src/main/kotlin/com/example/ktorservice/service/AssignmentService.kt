@@ -467,6 +467,57 @@ class AssignmentService(
     }
 
     // ============================================================
+// GET ALL ASSIGNMENTS FROM STORAGE
+// ============================================================
+
+    suspend fun getAllAssignments(
+        grade: Int? = null,
+        subject: String? = null,
+        topic: String? = null
+    ): List<AssignmentResult> {
+
+        return withContext(Dispatchers.IO) {
+
+            transaction {
+
+                var query =
+                    AssignmentsTable
+                        .selectAll()
+
+                if (grade != null) {
+                    query =
+                        query.andWhere {
+                            AssignmentsTable.grade eq grade
+                        }
+                }
+
+                if (!subject.isNullOrBlank()) {
+                    query =
+                        query.andWhere {
+                            AssignmentsTable.subject eq subject
+                        }
+                }
+
+                if (topic != null) {
+
+                    query =
+                        query.andWhere {
+
+                            AssignmentsTable.topic eq topic
+                        }
+                }
+
+                query
+                    .orderBy(
+                        AssignmentsTable.id to SortOrder.ASC
+                    )
+                    .map {
+                        rowToResult(it)
+                    }
+            }
+        }
+    }
+    // ============================================================
     // FIND EXISTING ASSIGNMENT
     // ============================================================
 

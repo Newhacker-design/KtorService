@@ -3,6 +3,8 @@ package com.example.ktorservice.routes
 import com.example.ktorservice.model.AssignmentActionResponse
 import com.example.ktorservice.model.AssignmentData
 import com.example.ktorservice.model.AssignmentGenerateResponse
+import com.example.ktorservice.model.AssignmentListResponse
+import com.example.ktorservice.model.AssignmentStorageData
 import com.example.ktorservice.model.AssignmentStudentData
 import com.example.ktorservice.model.AssignmentSubmitRequest
 import com.example.ktorservice.model.UserAssignmentResponse
@@ -19,7 +21,105 @@ fun Route.assignmentRoutes(
     authService: AuthService,
     assignmentService: AssignmentService
 ) {
+// ============================================================
+// GET /assignments
+// GET ASSIGNMENTS FROM STORAGE
+// ============================================================
 
+    get("/assignments") {
+
+        try {
+
+            val userId =
+                call.requireUserId(authService)
+
+            if (userId == null) {
+
+                call.respond(
+                    HttpStatusCode.Unauthorized,
+                    AssignmentListResponse(
+                        success = false,
+                        message = "Invalid or expired token"
+                    )
+                )
+
+                return@get
+            }
+
+            val grade =
+                call.request
+                    .queryParameters["grade"]
+                    ?.toIntOrNull()
+
+            val subject =
+                call.request
+                    .queryParameters["subject"]
+
+            val topic =
+                call.request
+                    .queryParameters["topic"]
+
+            println(
+                "========== GET ASSIGNMENT STORAGE =========="
+            )
+
+            println("USER ID = $userId")
+            println("GRADE = $grade")
+            println("SUBJECT = $subject")
+            println("TOPIC = $topic")
+
+            val assignments =
+                assignmentService.getAllAssignments(
+                    grade = grade,
+                    subject = subject,
+                    topic = topic
+                )
+
+            println(
+                "ASSIGNMENT STORAGE COUNT = ${assignments.size}"
+            )
+
+            call.respond(
+                HttpStatusCode.OK,
+                AssignmentListResponse(
+                    success = true,
+                    assignments =
+                        assignments.map { assignment ->
+
+                            AssignmentStorageData(
+                                id = assignment.id,
+                                grade = assignment.grade,
+                                subject = assignment.subject,
+                                topic = assignment.topic,
+                                title = assignment.title,
+                                content = assignment.content,
+                                answerKey = assignment.answerKey,
+                                gradingGuide = assignment.gradingGuide,
+                                totalScore = assignment.totalScore
+                            )
+                        }
+                )
+            )
+
+        } catch (e: Exception) {
+
+            println(
+                "========== GET ASSIGNMENT STORAGE ERROR =========="
+            )
+
+            e.printStackTrace()
+
+            call.respond(
+                HttpStatusCode.InternalServerError,
+                AssignmentListResponse(
+                    success = false,
+                    message =
+                        e.message
+                            ?: "Unknown error"
+                )
+            )
+        }
+    }
     // ============================================================
     // GET /assignments/generate
     // ============================================================

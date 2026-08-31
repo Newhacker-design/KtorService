@@ -50,6 +50,26 @@ data class UserAssignmentResponse(
 
     val message: String? = null
 )
+
+@Serializable
+data class AssignmentStorageData(
+    val id: Int,
+    val grade: Int,
+    val subject: String,
+    val topic: String? = null,
+    val title: String,
+    val content: String,
+    val answerKey: String,
+    val gradingGuide: String,
+    val totalScore: Double
+)
+
+@Serializable
+data class AssignmentListResponse(
+    val success: Boolean,
+    val assignments: List<AssignmentStorageData> = emptyList(),
+    val message: String? = null
+)
 @Serializable
 data class AssignmentSubmitRequest(
     val answer: String
