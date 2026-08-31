@@ -23,6 +23,130 @@ fun Route.assignmentRoutes(
     assignmentService: AssignmentService
 ) {
     // ============================================================
+    // GET NEXT ASSIGNMENT FOR PARENT
+    // ============================================================
+
+    get("/assignments/next") {
+
+        try {
+
+            val userId =
+                call.requireUserId(authService)
+
+            if (userId == null) {
+
+                call.respond(
+                    HttpStatusCode.Unauthorized,
+                    UserAssignmentResponse(
+                        success = false,
+                        message = "Invalid or expired token"
+                    )
+                )
+
+                return@get
+            }
+
+            val grade =
+                call.request
+                    .queryParameters["grade"]
+                    ?.toIntOrNull()
+
+            val subject =
+                call.request
+                    .queryParameters["subject"]
+
+            val topic =
+                call.request
+                    .queryParameters["topic"]
+
+            if (grade == null || grade !in 1..12) {
+
+                call.respond(
+                    HttpStatusCode.BadRequest,
+                    UserAssignmentResponse(
+                        success = false,
+                        message = "Invalid grade"
+                    )
+                )
+
+                return@get
+            }
+
+            if (subject.isNullOrBlank()) {
+
+                call.respond(
+                    HttpStatusCode.BadRequest,
+                    UserAssignmentResponse(
+                        success = false,
+                        message = "Subject is required"
+                    )
+                )
+
+                return@get
+            }
+
+            println(
+                "========== GET NEXT ASSIGNMENT FOR PARENT =========="
+            )
+
+            println("USER ID = $userId")
+            println("GRADE = $grade")
+            println("SUBJECT = $subject")
+            println("TOPIC = $topic")
+
+            val result =
+                assignmentService.getNextAssignmentForParent(
+                    userId = userId,
+                    grade = grade,
+                    subject = subject,
+                    topic = topic
+                )
+
+            call.respond(
+                HttpStatusCode.OK,
+                UserAssignmentResponse(
+                    success = true,
+                    id = result.id,
+                    assignmentId = result.assignmentId,
+                    userId = result.userId,
+                    status = result.status,
+                    answer = result.answer,
+                    score = result.score,
+                    feedback = result.feedback,
+                    startedAt = result.startedAt,
+                    completedAt = result.completedAt,
+                    assignment = AssignmentStudentData(
+                        id = result.assignment.id,
+                        grade = result.assignment.grade,
+                        subject = result.assignment.subject,
+                        topic = result.assignment.topic,
+                        title = result.assignment.title,
+                        content = result.assignment.content,
+                        totalScore = result.assignment.totalScore
+                    )
+                )
+            )
+
+        } catch (e: Exception) {
+
+            println(
+                "========== GET NEXT ASSIGNMENT ERROR =========="
+            )
+
+            e.printStackTrace()
+
+            call.respond(
+                HttpStatusCode.InternalServerError,
+                UserAssignmentResponse(
+                    success = false,
+                    message =
+                        e.message
+                            ?: "Unknown error"
+                )
+            )
+        }
+    }
+    // ============================================================
 // GET ASSIGNMENT FROM STORAGE
 // ============================================================
 
