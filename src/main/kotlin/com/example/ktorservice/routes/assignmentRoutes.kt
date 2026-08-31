@@ -3,6 +3,7 @@ package com.example.ktorservice.routes
 import com.example.ktorservice.model.AssignmentActionResponse
 import com.example.ktorservice.model.AssignmentData
 import com.example.ktorservice.model.AssignmentGenerateResponse
+import com.example.ktorservice.model.AssignmentStudentData
 import com.example.ktorservice.model.AssignmentSubmitRequest
 import com.example.ktorservice.model.UserAssignmentResponse
 import com.example.ktorservice.security.requireUserId
@@ -311,11 +312,9 @@ fun Route.assignmentRoutes(
                     feedback = result.feedback,
                     startedAt = result.startedAt,
                     completedAt = result.completedAt,
-                    assignment = AssignmentData(
+                    assignment = AssignmentStudentData(
                         title = result.assignment.title,
                         content = result.assignment.content,
-                        answerKey = result.assignment.answerKey,
-                        gradingGuide = result.assignment.gradingGuide,
                         totalScore = result.assignment.totalScore
                     )
                 )

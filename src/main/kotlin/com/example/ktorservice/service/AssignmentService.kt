@@ -379,9 +379,9 @@ class AssignmentService(
             )
                 ?: return null
 
-        /*if (userAssignment.status == "COMPLETED") {
+        if (userAssignment.status == "COMPLETED") {
             return userAssignment
-        }*/
+        }
 
         println("========== SUBMIT ASSIGNMENT ==========")
         println("USER ID = $userId")
