@@ -11,7 +11,7 @@ object AssignmentsTable : Table("assignments") {
         integer("grade")
 
     val subject =
-        varchar("subject", 50)
+        varchar("subject", 100)
 
     val topic =
         varchar("topic", 255)
@@ -19,10 +19,6 @@ object AssignmentsTable : Table("assignments") {
 
     val title =
         varchar("title", 500)
-
-    val questions =
-        text("questions")
-            .default("[]")
 
     val content =
         text("content")
@@ -35,7 +31,6 @@ object AssignmentsTable : Table("assignments") {
 
     val totalScore =
         double("total_score")
-            .default(10.0)
 
     val createdAt =
         long("created_at")
