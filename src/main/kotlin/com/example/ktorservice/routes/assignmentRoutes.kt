@@ -11,6 +11,7 @@ import com.example.ktorservice.service.AuthService
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.request.receive
 import io.ktor.server.response.respond
+import io.ktor.server.response.respondText
 import io.ktor.server.routing.*
 
 fun Route.assignmentRoutes(
@@ -445,6 +446,23 @@ fun Route.assignmentRoutes(
                         e.message
                             ?: "Unknown error"
                 )
+            )
+        }
+    }
+    get("/debug/postgres") {
+        try {
+            val socket = java.net.Socket()
+            socket.connect(
+                java.net.InetSocketAddress("100.76.246.38", 5432),
+                5000
+            )
+            socket.close()
+
+            call.respondText("POSTGRES TCP OK")
+        } catch (e: Exception) {
+            call.respondText(
+                "POSTGRES TCP FAILED: ${e.javaClass.name}: ${e.message}",
+                status = HttpStatusCode.InternalServerError
             )
         }
     }
