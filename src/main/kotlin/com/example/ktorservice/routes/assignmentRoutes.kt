@@ -21,6 +21,107 @@ fun Route.assignmentRoutes(
     authService: AuthService,
     assignmentService: AssignmentService
 ) {
+    // ============================================================
+// GET ASSIGNMENT FROM STORAGE
+// ============================================================
+
+    get("/assignments/{id}") {
+
+        try {
+
+            val userId =
+                call.requireUserId(authService)
+
+            if (userId == null) {
+
+                call.respond(
+                    HttpStatusCode.Unauthorized,
+                    AssignmentGenerateResponse(
+                        success = false,
+                        message = "Invalid or expired token"
+                    )
+                )
+
+                return@get
+            }
+
+            val id =
+                call.parameters["id"]
+                    ?.toIntOrNull()
+
+            if (id == null) {
+
+                call.respond(
+                    HttpStatusCode.BadRequest,
+                    AssignmentGenerateResponse(
+                        success = false,
+                        message = "Invalid assignment id"
+                    )
+                )
+
+                return@get
+            }
+
+            println("========== GET ASSIGNMENT FROM STORAGE ==========")
+            println("USER ID = $userId")
+            println("ASSIGNMENT ID = $id")
+
+            val result =
+                assignmentService.getById(id)
+
+            if (result == null) {
+
+                call.respond(
+                    HttpStatusCode.NotFound,
+                    AssignmentGenerateResponse(
+                        success = false,
+                        message = "Assignment not found"
+                    )
+                )
+
+                return@get
+            }
+
+            println("ASSIGNMENT FOUND")
+            println("TITLE = ${result.title}")
+            println("GRADE = ${result.grade}")
+            println("SUBJECT = ${result.subject}")
+
+            call.respond(
+                HttpStatusCode.OK,
+                mapOf(
+                    "success" to true,
+                    "assignment" to AssignmentStudentData(
+                        id = result.id,
+                        grade = result.grade,
+                        subject = result.subject,
+                        topic = result.topic,
+                        title = result.title,
+                        content = result.content,
+                        totalScore = result.totalScore
+                    )
+                )
+            )
+
+        } catch (e: Exception) {
+
+            println(
+                "========== GET ASSIGNMENT ERROR =========="
+            )
+
+            e.printStackTrace()
+
+            call.respond(
+                HttpStatusCode.InternalServerError,
+                mapOf(
+                    "success" to false,
+                    "message" to (
+                            e.message ?: "Unknown error"
+                            )
+                )
+            )
+        }
+    }
 // ============================================================
 // GET /assignments
 // GET ASSIGNMENTS FROM STORAGE
@@ -413,6 +514,10 @@ fun Route.assignmentRoutes(
                     startedAt = result.startedAt,
                     completedAt = result.completedAt,
                     assignment = AssignmentStudentData(
+                        id = result.assignment.id,
+                        grade = result.assignment.grade,
+                        subject = result.assignment.subject,
+                        topic = result.assignment.topic,
                         title = result.assignment.title,
                         content = result.assignment.content,
                         totalScore = result.assignment.totalScore

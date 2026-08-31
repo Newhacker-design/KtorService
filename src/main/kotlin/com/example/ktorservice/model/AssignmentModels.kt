@@ -19,6 +19,10 @@ data class AssignmentData(
 )
 @Serializable
 data class AssignmentStudentData(
+    val id: Int,
+    val grade: Int,
+    val subject: String,
+    val topic: String? = null,
     val title: String,
     val content: String,
     val totalScore: Double
