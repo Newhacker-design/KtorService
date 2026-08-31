@@ -151,9 +151,12 @@ for i in $(seq 1 60); do
 
     echo "----------------------------------------"
     echo "PostgreSQL check attempt $i/60"
-    echo "Testing $DB_HOST:$DB_PORT"
+    echo "Testing Tailscale $DB_HOST:$DB_PORT"
 
-    if nc -vz -w 10 "$DB_HOST" "$DB_PORT"; then
+    if timeout 10 tailscale \
+        --socket="$TAILSCALE_SOCKET" \
+        nc "$DB_HOST" "$DB_PORT" </dev/null >/dev/null 2>&1
+    then
         echo "PostgreSQL TCP connection SUCCESS"
         DB_READY=true
         break
@@ -163,7 +166,6 @@ for i in $(seq 1 60); do
 
     sleep 2
 done
-
 if [ "$DB_READY" != "true" ]; then
 
     echo "========================================"
@@ -182,9 +184,11 @@ if [ "$DB_READY" != "true" ]; then
         --socket="$TAILSCALE_SOCKET" \
         ping "$DB_HOST" || true
 
-    echo "===== TCP TEST ====="
+   echo "===== TAILSCALE TCP TEST ====="
 
-    nc -vz -w 10 "$DB_HOST" "$DB_PORT" || true
+   timeout 10 tailscale \
+       --socket="$TAILSCALE_SOCKET" \
+       nc "$DB_HOST" "$DB_PORT" </dev/null || true
 
     exit 1
 fi
@@ -203,7 +207,8 @@ echo "CHECKING JAR:"
 ls -lh /app/build/libs/KtorService-all.jar
 
 echo "STARTING JAVA..."
-
+export ALL_PROXY="socks5://127.0.0.1:1055"
+export all_proxy="socks5://127.0.0.1:1055"
 exec java \
     --enable-native-access=ALL-UNNAMED \
     -jar /app/build/libs/KtorService-all.jar
