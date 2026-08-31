@@ -63,4 +63,19 @@ echo "========================================"
 echo "Starting Ktor..."
 echo "========================================"
 
+echo "JAVA VERSION:"
+java -version
+
+echo "CHECKING JAR..."
+
+if [ ! -f build/libs/KtorService-all.jar ]; then
+    echo "ERROR: JAR NOT FOUND"
+    ls -lah build/libs
+    exit 1
+fi
+
+ls -lh build/libs/KtorService-all.jar
+
+echo "STARTING JAVA..."
+
 exec java -jar build/libs/KtorService-all.jar
