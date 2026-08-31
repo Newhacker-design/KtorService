@@ -14,42 +14,24 @@ import java.util.concurrent.ConcurrentHashMap
 class AssignmentService(
     private val aiService: AIService
 ) {
+    private val assignmentGenerationMutex = Mutex()
+    // ============================================================
+// GET NEXT ASSIGNMENT
+//
+// - Ưu tiên lấy bài đã có trong kho
+// - Không lấy bài đã giao cho user này
+// - Khi lấy được bài -> ghi user_assignments ngay
+// - Nếu kho hết -> AI tạo bài mới
+// - Bài AI tạo được lưu vào kho
+// - Sau đó giao bài đó cho user
 // ============================================================
-    // GENERATION LOCK
-    // ============================================================
 
-    private val generationLocks =
-        ConcurrentHashMap<String, Mutex>()
-
-    private fun getGenerationLock(
-        grade: Int,
-        subject: String,
-        topic: String?
-    ): Mutex {
-
-        val key =
-            buildString {
-
-                append(grade)
-                append("|")
-                append(subject.trim().lowercase())
-                append("|")
-                append(topic?.trim()?.lowercase() ?: "")
-            }
-
-        return generationLocks.computeIfAbsent(key) {
-            Mutex()
-        }
-    }
-    // ============================================================
-    // GET OR GENERATE
-    // ============================================================
-
-    suspend fun getOrGenerateAssignment(
+    suspend fun getNextAssignment(
+        userId: Int,
         grade: Int,
         subject: String,
         topic: String? = null
-    ): AssignmentResult {
+    ): UserAssignmentResult {
 
         require(grade in 1..12) {
             "Invalid grade"
@@ -59,127 +41,219 @@ class AssignmentService(
             "Subject is required"
         }
 
-        val existing =
-            findExistingAssignment(
+        println("========== GET NEXT ASSIGNMENT ==========")
+        println("USER ID = $userId")
+        println("GRADE = $grade")
+        println("SUBJECT = $subject")
+        println("TOPIC = $topic")
+
+        // ========================================================
+        // BƯỚC 1
+        // Tìm bài đã có trong kho nhưng CHƯA giao cho user
+        // ========================================================
+
+        val existingAssignment =
+            findNextAvailableAssignment(
+                userId = userId,
                 grade = grade,
                 subject = subject,
                 topic = topic
             )
 
-        if (existing != null) {
+        if (existingAssignment != null) {
 
             println(
-                "ASSIGNMENT CACHE HIT: " +
-                        "grade=$grade " +
-                        "subject=$subject " +
-                        "topic=$topic " +
-                        "id=${existing.id}"
+                "ASSIGNMENT STORAGE HIT: " +
+                        "id=${existingAssignment.id}"
             )
 
-            return existing
+            return createUserAssignmentImmediately(
+                userId = userId,
+                assignment = existingAssignment
+            )
         }
 
-        println(
-            "ASSIGNMENT CACHE MISS: " +
-                    "grade=$grade " +
-                    "subject=$subject " +
-                    "topic=$topic"
-        )
+        // ========================================================
+        // BƯỚC 2
+        // Kho hết.
+        //
+        // Khóa phần generate để:
+        //
+        // User A -> AI generate
+        // User B -> chờ
+        // User C -> chờ
+        //
+        // Khi A tạo xong, B/C sẽ kiểm tra lại kho.
+        // ========================================================
 
-        println("GENERATING NEW ASSIGNMENT WITH AI...")
+        return assignmentGenerationMutex.withLock {
 
-        val generated =
-            aiService.generateAssignment(
-                grade = grade,
-                subject = subject,
-                topic = topic
+            println(
+                "NO AVAILABLE ASSIGNMENT IN STORAGE"
             )
 
-        val id =
-            withContext(Dispatchers.IO) {
+            println(
+                "WAITING FOR ASSIGNMENT GENERATION LOCK..."
+            )
 
-                transaction {
+            // ----------------------------------------------------
+            // QUAN TRỌNG:
+            // Trong lúc chờ Mutex, tài khoản khác có thể vừa
+            // tạo bài và lưu vào kho.
+            //
+            // Vì vậy phải kiểm tra kho LẠI.
+            // ----------------------------------------------------
 
-                    val statement =
-                        AssignmentsTable.insert {
+            val assignmentAfterLock =
+                findNextAvailableAssignment(
+                    userId = userId,
+                    grade = grade,
+                    subject = subject,
+                    topic = topic
+                )
 
-                            it[AssignmentsTable.grade] =
-                                grade
+            if (assignmentAfterLock != null) {
 
-                            it[AssignmentsTable.subject] =
-                                subject
+                println(
+                    "ASSIGNMENT BECAME AVAILABLE WHILE WAITING: " +
+                            "id=${assignmentAfterLock.id}"
+                )
 
-                            it[AssignmentsTable.topic] =
-                                topic
-
-                            it[AssignmentsTable.title] =
-                                generated.title
-
-                            it[AssignmentsTable.content] =
-                                generated.content
-
-                            it[AssignmentsTable.answerKey] =
-                                generated.answerKey
-
-                            it[AssignmentsTable.gradingGuide] =
-                                generated.gradingGuide
-
-                            it[AssignmentsTable.totalScore] =
-                                generated.totalScore
-
-                            it[AssignmentsTable.createdAt] =
-                                System.currentTimeMillis()
-                        }
-
-                    statement[
-                        AssignmentsTable.id
-                    ]
-                }
+                return@withLock createUserAssignmentImmediately(
+                    userId = userId,
+                    assignment = assignmentAfterLock
+                )
             }
 
-        println(
-            "ASSIGNMENT SAVED: id=$id"
-        )
+            // ====================================================
+            // BƯỚC 3
+            // Thực sự không còn bài -> gọi AI
+            // ====================================================
 
-        return AssignmentResult(
-            id = id,
-            grade = grade,
-            subject = subject,
-            topic = topic,
-            title = generated.title,
-            content = generated.content,
-            answerKey = generated.answerKey,
-            gradingGuide = generated.gradingGuide,
-            totalScore = generated.totalScore
-        )
-    }
-
-    // ============================================================
-    // GET OR CREATE USER ASSIGNMENT
-    // ============================================================
-
-    suspend fun getOrCreateUserAssignment(
-        userId: Int,
-        grade: Int,
-        subject: String,
-        topic: String? = null
-    ): UserAssignmentResult {
-
-        val assignment =
-            getOrGenerateAssignment(
-                grade = grade,
-                subject = subject,
-                topic = topic
+            println(
+                "ASSIGNMENT STORAGE EMPTY"
             )
+
+            println(
+                "GENERATING NEW ASSIGNMENT WITH AI..."
+            )
+
+            val generated =
+                aiService.generateAssignment(
+                    grade = grade,
+                    subject = subject,
+                    topic = topic
+                )
+
+            // ====================================================
+            // BƯỚC 4
+            // Lưu bài AI vào kho
+            // ====================================================
+
+            val assignment =
+                withContext(Dispatchers.IO) {
+
+                    transaction {
+
+                        val statement =
+                            AssignmentsTable.insert {
+
+                                it[AssignmentsTable.grade] =
+                                    grade
+
+                                it[AssignmentsTable.subject] =
+                                    subject
+
+                                it[AssignmentsTable.topic] =
+                                    topic
+
+                                it[AssignmentsTable.title] =
+                                    generated.title
+
+                                it[AssignmentsTable.content] =
+                                    generated.content
+
+                                it[AssignmentsTable.answerKey] =
+                                    generated.answerKey
+
+                                it[AssignmentsTable.gradingGuide] =
+                                    generated.gradingGuide
+
+                                it[AssignmentsTable.totalScore] =
+                                    generated.totalScore
+
+                                it[AssignmentsTable.createdAt] =
+                                    System.currentTimeMillis()
+                            }
+
+                        val id =
+                            statement[
+                                AssignmentsTable.id
+                            ]
+
+                        println(
+                            "NEW ASSIGNMENT SAVED: id=$id"
+                        )
+
+                        AssignmentResult(
+                            id = id,
+                            grade = grade,
+                            subject = subject,
+                            topic = topic,
+                            title = generated.title,
+                            content = generated.content,
+                            answerKey = generated.answerKey,
+                            gradingGuide = generated.gradingGuide,
+                            totalScore = generated.totalScore
+                        )
+                    }
+                }
+
+            // ====================================================
+            // BƯỚC 5
+            // Ghi nhận giao cho user NGAY
+            // ====================================================
+
+            println(
+                "ASSIGNING NEW AI ASSIGNMENT TO USER"
+            )
+
+            println(
+                "USER ID = $userId"
+            )
+
+            println(
+                "ASSIGNMENT ID = ${assignment.id}"
+            )
+
+            createUserAssignmentImmediately(
+                userId = userId,
+                assignment = assignment
+            )
+        }
+    }
+    // ============================================================
+// CREATE USER ASSIGNMENT IMMEDIATELY
+// ============================================================
+
+    private suspend fun createUserAssignmentImmediately(
+        userId: Int,
+        assignment: AssignmentResult
+    ): UserAssignmentResult {
 
         return withContext(Dispatchers.IO) {
 
             transaction {
 
+                // ------------------------------------------------
+                // Kiểm tra lần cuối để chống giao trùng
+                // ------------------------------------------------
+
                 val existing =
                     UserAssignmentsTable
                         .selectAll()
                         .where {
+
                             (UserAssignmentsTable.userId eq userId) and
                                     (
                                             UserAssignmentsTable.assignmentId eq
@@ -190,11 +264,21 @@ class AssignmentService(
 
                 if (existing != null) {
 
+                    println(
+                        "USER ASSIGNMENT ALREADY EXISTS: " +
+                                "user=$userId " +
+                                "assignment=${assignment.id}"
+                    )
+
                     return@transaction rowToUserAssignment(
                         existing,
                         assignment
                     )
                 }
+
+                // ------------------------------------------------
+                // Tạo bản ghi mới
+                // ------------------------------------------------
 
                 val statement =
                     UserAssignmentsTable.insert {
@@ -236,23 +320,89 @@ class AssignmentService(
             }
         }
     }
-
-    // ============================================================
-    // GET TODAY / NEXT ASSIGNMENT
-    // ============================================================
-
-    suspend fun getTodayAssignment(
+    private suspend fun findNextAvailableAssignment(
         userId: Int,
         grade: Int,
-        subject: String
-    ): UserAssignmentResult {
+        subject: String,
+        topic: String?
+    ): AssignmentResult? {
 
-        return getOrCreateUserAssignment(
-            userId = userId,
-            grade = grade,
-            subject = subject
-        )
+        return withContext(Dispatchers.IO) {
+
+            transaction {
+
+                AssignmentsTable
+                    .selectAll()
+                    .where {
+
+                        (AssignmentsTable.grade eq grade) and
+                                (AssignmentsTable.subject eq subject) and
+                                (
+                                        if (topic == null) {
+                                            AssignmentsTable.topic.isNull()
+                                        } else {
+                                            AssignmentsTable.topic eq topic
+                                        }
+                                        )
+                    }
+                    .orderBy(
+                        AssignmentsTable.id to SortOrder.ASC
+                    )
+                    .firstOrNull { row ->
+
+                        val assignmentId =
+                            row[AssignmentsTable.id]
+
+                        val alreadyAssigned =
+                            UserAssignmentsTable
+                                .selectAll()
+                                .where {
+
+                                    (UserAssignmentsTable.userId eq userId) and
+                                            (
+                                                    UserAssignmentsTable.assignmentId eq
+                                                            assignmentId
+                                                    )
+                                }
+                                .count() > 0
+
+                        !alreadyAssigned
+                    }
+                    ?.let {
+                        rowToResult(it)
+                    }
+            }
+        }
     }
+// ============================================================
+    // GENERATION LOCK
+    // ============================================================
+
+    private val generationLocks =
+        ConcurrentHashMap<String, Mutex>()
+
+    private fun getGenerationLock(
+        grade: Int,
+        subject: String,
+        topic: String?
+    ): Mutex {
+
+        val key =
+            buildString {
+
+                append(grade)
+                append("|")
+                append(subject.trim().lowercase())
+                append("|")
+                append(topic?.trim()?.lowercase() ?: "")
+            }
+
+        return generationLocks.computeIfAbsent(key) {
+            Mutex()
+        }
+    }
+
+
 
     // ============================================================
     // GET USER ASSIGNMENT BY ID
@@ -1035,175 +1185,6 @@ class AssignmentService(
     // ============================================================
 // GET NEXT ASSIGNMENT FOR USER
 // ============================================================
-
-    suspend fun getNextAssignment(
-        userId: Int,
-        grade: Int,
-        subject: String
-    ): UserAssignmentResult? {
-
-        require(grade in 1..12) {
-            "Invalid grade"
-        }
-
-        require(subject.isNotBlank()) {
-            "Subject is required"
-        }
-
-        return withContext(Dispatchers.IO) {
-
-            transaction {
-
-                println(
-                    "========== GET NEXT ASSIGNMENT =========="
-                )
-
-                println("USER ID = $userId")
-                println("GRADE = $grade")
-                println("SUBJECT = $subject")
-
-                // ====================================================
-                // TÌM BÀI ĐẦU TIÊN USER CHƯA NHẬN
-                // ====================================================
-
-                val row =
-                    AssignmentsTable
-                        .selectAll()
-                        .where {
-                            AssignmentsTable.grade eq grade
-                        }
-                        .andWhere {
-                            AssignmentsTable.subject eq subject
-                        }
-                        .orderBy(
-                            AssignmentsTable.id to SortOrder.ASC
-                        )
-                        .firstOrNull { assignmentRow ->
-
-                            val assignmentId =
-                                assignmentRow[
-                                    AssignmentsTable.id
-                                ]
-
-                            val alreadyAssigned =
-                                UserAssignmentsTable
-                                    .selectAll()
-                                    .where {
-                                        (UserAssignmentsTable.userId eq userId) and
-                                                (
-                                                        UserAssignmentsTable.assignmentId eq
-                                                                assignmentId
-                                                        )
-                                    }
-                                    .any()
-
-                            !alreadyAssigned
-                        }
-
-                // ====================================================
-                // KHÔNG CÒN BÀI
-                // ====================================================
-
-                if (row == null) {
-
-                    println(
-                        "NO NEW ASSIGNMENT AVAILABLE"
-                    )
-
-                    return@transaction null
-                }
-
-                val assignment =
-                    rowToResult(row)
-
-                println(
-                    "NEXT ASSIGNMENT FOUND"
-                )
-
-                println(
-                    "ASSIGNMENT ID = ${assignment.id}"
-                )
-
-                println(
-                    "TITLE = ${assignment.title}"
-                )
-
-                // ====================================================
-                // ĐÁNH DẤU ĐÃ GIAO NGAY
-                // ====================================================
-
-                val statement =
-                    UserAssignmentsTable.insert {
-
-                        it[UserAssignmentsTable.userId] =
-                            userId
-
-                        it[UserAssignmentsTable.assignmentId] =
-                            assignment.id
-
-                        it[UserAssignmentsTable.status] =
-                            "NEW"
-                    }
-
-                val userAssignmentId =
-                    statement[
-                        UserAssignmentsTable.id
-                    ]
-
-                println(
-                    "USER ASSIGNMENT CREATED"
-                )
-
-                println(
-                    "USER ASSIGNMENT ID = $userAssignmentId"
-                )
-
-                println(
-                    "USER ID = $userId"
-                )
-
-                println(
-                    "ASSIGNMENT ID = ${assignment.id}"
-                )
-
-                // ====================================================
-                // TRẢ KẾT QUẢ
-                // ====================================================
-
-                UserAssignmentResult(
-                    id =
-                        userAssignmentId,
-
-                    assignmentId =
-                        assignment.id,
-
-                    userId =
-                        userId,
-
-                    status =
-                        "NEW",
-
-                    answer =
-                        null,
-
-                    score =
-                        null,
-
-                    feedback =
-                        null,
-
-                    startedAt =
-                        null,
-
-                    completedAt =
-                        null,
-
-                    assignment =
-                        assignment
-                )
-            }
-        }
-    }
     private suspend fun findExistingAssignment(
         grade: Int,
         subject: String,

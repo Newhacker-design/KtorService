@@ -24,7 +24,17 @@ fun Route.assignmentRoutes(
 ) {
 // ============================================================
 // GET /assignments/next
-// GET NEXT ASSIGNMENT FOR CURRENT USER
+//
+// Lấy bài tiếp theo cho phụ huynh.
+//
+// Nếu kho còn bài:
+//     lấy bài cũ
+//
+// Nếu kho hết:
+//     AI tạo bài mới
+//
+// Sau khi lấy được:
+//     ghi user_assignments ngay
 // ============================================================
 
     get("/assignments/next") {
@@ -56,6 +66,10 @@ fun Route.assignmentRoutes(
                 call.request
                     .queryParameters["subject"]
 
+            val topic =
+                call.request
+                    .queryParameters["topic"]
+
             if (grade == null || grade !in 1..12) {
 
                 call.respond(
@@ -83,39 +97,24 @@ fun Route.assignmentRoutes(
             }
 
             println(
-                "========== GET NEXT ASSIGNMENT API =========="
+                "========== GET NEXT ASSIGNMENT =========="
             )
 
             println("USER ID = $userId")
             println("GRADE = $grade")
             println("SUBJECT = $subject")
+            println("TOPIC = $topic")
 
             val result =
                 assignmentService.getNextAssignment(
                     userId = userId,
                     grade = grade,
-                    subject = subject
+                    subject = subject,
+                    topic = topic
                 )
-
-            if (result == null) {
-
-                println(
-                    "NO NEW ASSIGNMENT AVAILABLE"
-                )
-
-                call.respond(
-                    HttpStatusCode.OK,
-                    UserAssignmentResponse(
-                        success = false,
-                        message = "No new assignment available"
-                    )
-                )
-
-                return@get
-            }
 
             println(
-                "NEXT ASSIGNMENT RETURNED"
+                "NEXT ASSIGNMENT RESULT"
             )
 
             println(
@@ -126,12 +125,17 @@ fun Route.assignmentRoutes(
                 "ASSIGNMENT ID = ${result.assignmentId}"
             )
 
+            println(
+                "TITLE = ${result.assignment.title}"
+            )
+
             call.respond(
                 HttpStatusCode.OK,
                 UserAssignmentResponse(
                     success = true,
 
-                    id = result.id,
+                    id =
+                        result.id,
 
                     assignmentId =
                         result.assignmentId,
@@ -405,236 +409,8 @@ fun Route.assignmentRoutes(
             )
         }
     }
-    // ============================================================
-    // GET /assignments/generate
-    // ============================================================
 
-    get("/assignments/generate") {
 
-        try {
-
-            val userId =
-                call.requireUserId(authService)
-
-            if (userId == null) {
-
-                call.respond(
-                    HttpStatusCode.Unauthorized,
-                    AssignmentGenerateResponse(
-                        success = false,
-                        message = "Invalid or expired token"
-                    )
-                )
-
-                return@get
-            }
-
-            val grade =
-                call.request
-                    .queryParameters["grade"]
-                    ?.toIntOrNull()
-
-            val subject =
-                call.request
-                    .queryParameters["subject"]
-
-            val topic =
-                call.request
-                    .queryParameters["topic"]
-
-            if (grade == null || grade !in 1..12) {
-
-                call.respond(
-                    HttpStatusCode.BadRequest,
-                    AssignmentGenerateResponse(
-                        success = false,
-                        message = "Invalid grade"
-                    )
-                )
-
-                return@get
-            }
-
-            if (subject.isNullOrBlank()) {
-
-                call.respond(
-                    HttpStatusCode.BadRequest,
-                    AssignmentGenerateResponse(
-                        success = false,
-                        message = "Subject is required"
-                    )
-                )
-
-                return@get
-            }
-
-            println("========== GENERATE ASSIGNMENT ==========")
-            println("USER ID = $userId")
-            println("GRADE = $grade")
-            println("SUBJECT = $subject")
-            println("TOPIC = $topic")
-
-            // ====================================================
-            // GENERATE THROUGH ASSIGNMENT SERVICE
-            // ====================================================
-
-            val result =
-                assignmentService.getOrGenerateAssignment(
-                    grade = grade,
-                    subject = subject,
-                    topic = topic
-                )
-
-            val assignment =
-                AssignmentData(
-                    title = result.title,
-                    content = result.content,
-                    answerKey = result.answerKey,
-                    gradingGuide = result.gradingGuide,
-                    totalScore = result.totalScore
-                )
-
-            call.respond(
-                HttpStatusCode.OK,
-                AssignmentGenerateResponse(
-                    success = true,
-                    assignment = assignment
-                )
-            )
-
-        } catch (e: Exception) {
-
-            println(
-                "========== GENERATE ASSIGNMENT ERROR =========="
-            )
-
-            e.printStackTrace()
-
-            call.respond(
-                HttpStatusCode.InternalServerError,
-                AssignmentGenerateResponse(
-                    success = false,
-                    message =
-                        e.message
-                            ?: "Unknown error"
-                )
-            )
-        }
-    }
-    get("/assignments/today") {
-
-        try {
-
-            val userId =
-                call.requireUserId(authService)
-
-            if (userId == null) {
-
-                call.respond(
-                    HttpStatusCode.Unauthorized,
-                    AssignmentGenerateResponse(
-                        success = false,
-                        message = "Invalid or expired token"
-                    )
-                )
-
-                return@get
-            }
-
-            val grade =
-                call.request
-                    .queryParameters["grade"]
-                    ?.toIntOrNull()
-
-            val subject =
-                call.request
-                    .queryParameters["subject"]
-
-            if (grade == null || grade !in 1..12) {
-
-                call.respond(
-                    HttpStatusCode.BadRequest,
-                    AssignmentGenerateResponse(
-                        success = false,
-                        message = "Invalid grade"
-                    )
-                )
-
-                return@get
-            }
-
-            if (subject.isNullOrBlank()) {
-
-                call.respond(
-                    HttpStatusCode.BadRequest,
-                    AssignmentGenerateResponse(
-                        success = false,
-                        message = "Subject is required"
-                    )
-                )
-
-                return@get
-            }
-
-            println(
-                "========== GET TODAY ASSIGNMENT =========="
-            )
-
-            println("USER ID = $userId")
-            println("GRADE = $grade")
-            println("SUBJECT = $subject")
-
-            val result =
-                assignmentService.getTodayAssignment(
-                    userId = userId,
-                    grade = grade,
-                    subject = subject
-                )
-
-            call.respond(
-                HttpStatusCode.OK,
-                UserAssignmentResponse(
-                    success = true,
-                    id = result.id,
-                    assignmentId = result.assignmentId,
-                    userId = result.userId,
-                    status = result.status,
-                    answer = result.answer,
-                    score = result.score,
-                    feedback = result.feedback,
-                    startedAt = result.startedAt,
-                    completedAt = result.completedAt,
-                    assignment = AssignmentStudentData(
-                        id = result.assignment.id,
-                        grade = result.assignment.grade,
-                        subject = result.assignment.subject,
-                        topic = result.assignment.topic,
-                        title = result.assignment.title,
-                        content = result.assignment.content,
-                        totalScore = result.assignment.totalScore
-                    )
-                )
-            )
-
-        } catch (e: Exception) {
-
-            println(
-                "========== GET TODAY ASSIGNMENT ERROR =========="
-            )
-
-            e.printStackTrace()
-
-            call.respond(
-                HttpStatusCode.InternalServerError,
-                UserAssignmentResponse(
-                    success = false,
-                    message =
-                        e.message
-                            ?: "Unknown error"
-                )
-            )
-        }
-    }
     post("/assignments/{id}/start") {
 
         try {
