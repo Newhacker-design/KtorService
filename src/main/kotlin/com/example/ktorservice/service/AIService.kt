@@ -609,17 +609,11 @@ class AIService {
                             ?: "Unknown Gemini error"
                     }
 
-                println(
-                    "GEMINI GRADING HTTP CODE = $responseCode"
-                )
+                println("GEMINI GRADING HTTP CODE = $responseCode")
 
-                println(
-                    "========== GEMINI GRADING RAW RESPONSE =========="
-                )
+                println("========== GEMINI GRADING RAW RESPONSE ==========")
                 println(responseText)
-                println(
-                    "=================================================="
-                )
+                println("=================================================")
 
                 if (responseCode !in 200..299) {
 
@@ -628,9 +622,7 @@ class AIService {
                     )
                 }
 
-                parseGradingResponse(
-                    responseText
-                )
+                parseGradingResponse(responseText)
 
             } finally {
 
