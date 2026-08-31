@@ -135,6 +135,99 @@ fun Route.assignmentRoutes(
             )
         }
     }
+    get("/assignments/{id}") {
+
+        try {
+
+            val userId =
+                call.requireUserId(authService)
+
+            if (userId == null) {
+
+                call.respond(
+                    HttpStatusCode.Unauthorized,
+                    AssignmentGenerateResponse(
+                        success = false,
+                        message = "Invalid or expired token"
+                    )
+                )
+
+                return@get
+            }
+
+            val id =
+                call.parameters["id"]
+                    ?.toIntOrNull()
+
+            if (id == null) {
+
+                call.respond(
+                    HttpStatusCode.BadRequest,
+                    AssignmentGenerateResponse(
+                        success = false,
+                        message = "Invalid assignment id"
+                    )
+                )
+
+                return@get
+            }
+
+            println(
+                "========== GET ASSIGNMENT BY ID =========="
+            )
+
+            println("USER ID = $userId")
+            println("ASSIGNMENT ID = $id")
+
+            val result =
+                assignmentService.getById(id)
+
+            if (result == null) {
+
+                call.respond(
+                    HttpStatusCode.NotFound,
+                    AssignmentGenerateResponse(
+                        success = false,
+                        message = "Assignment not found"
+                    )
+                )
+
+                return@get
+            }
+
+            call.respond(
+                HttpStatusCode.OK,
+                AssignmentGenerateResponse(
+                    success = true,
+                    assignment = AssignmentData(
+                        title = result.title,
+                        content = result.content,
+                        answerKey = result.answerKey,
+                        gradingGuide = result.gradingGuide,
+                        totalScore = result.totalScore
+                    )
+                )
+            )
+
+        } catch (e: Exception) {
+
+            println(
+                "========== GET ASSIGNMENT BY ID ERROR =========="
+            )
+
+            e.printStackTrace()
+
+            call.respond(
+                HttpStatusCode.InternalServerError,
+                AssignmentGenerateResponse(
+                    success = false,
+                    message =
+                        e.message
+                            ?: "Unknown error"
+                )
+            )
+        }
+    }
     get("/assignments/today") {
 
         try {
