@@ -210,5 +210,7 @@ echo "STARTING JAVA..."
 export ALL_PROXY="socks5://127.0.0.1:1055"
 export all_proxy="socks5://127.0.0.1:1055"
 exec java \
+    -DsocksProxyHost=127.0.0.1 \
+    -DsocksProxyPort=1055 \
     --enable-native-access=ALL-UNNAMED \
     -jar /app/build/libs/KtorService-all.jar
