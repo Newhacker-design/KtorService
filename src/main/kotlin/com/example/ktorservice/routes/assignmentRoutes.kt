@@ -23,8 +23,9 @@ fun Route.assignmentRoutes(
     assignmentService: AssignmentService
 ) {
     // ============================================================
-    // GET NEXT ASSIGNMENT FOR PARENT
-    // ============================================================
+// GET /assignments/next
+// GET NEXT UNUSED ASSIGNMENT FOR CURRENT USER
+// ============================================================
 
     get("/assignments/next") {
 
@@ -55,10 +56,6 @@ fun Route.assignmentRoutes(
                 call.request
                     .queryParameters["subject"]
 
-            val topic =
-                call.request
-                    .queryParameters["topic"]
-
             if (grade == null || grade !in 1..12) {
 
                 call.respond(
@@ -86,44 +83,110 @@ fun Route.assignmentRoutes(
             }
 
             println(
-                "========== GET NEXT ASSIGNMENT FOR PARENT =========="
+                "========== GET NEXT ASSIGNMENT =========="
             )
 
             println("USER ID = $userId")
             println("GRADE = $grade")
             println("SUBJECT = $subject")
-            println("TOPIC = $topic")
 
             val result =
-                assignmentService.getNextAssignmentForParent(
+                assignmentService.getNextAssignment(
                     userId = userId,
                     grade = grade,
-                    subject = subject,
-                    topic = topic
+                    subject = subject
                 )
+
+            if (result == null) {
+
+                println(
+                    "NO NEW ASSIGNMENT FOR USER"
+                )
+
+                call.respond(
+                    HttpStatusCode.OK,
+                    UserAssignmentResponse(
+                        success = false,
+                        message = "No new assignment available"
+                    )
+                )
+
+                return@get
+            }
+
+            println(
+                "NEXT ASSIGNMENT RETURNED"
+            )
+
+            println(
+                "USER ASSIGNMENT ID = ${result.id}"
+            )
+
+            println(
+                "ASSIGNMENT ID = ${result.assignmentId}"
+            )
+
+            println(
+                "TITLE = ${result.assignment.title}"
+            )
 
             call.respond(
                 HttpStatusCode.OK,
                 UserAssignmentResponse(
+
                     success = true,
-                    id = result.id,
-                    assignmentId = result.assignmentId,
-                    userId = result.userId,
-                    status = result.status,
-                    answer = result.answer,
-                    score = result.score,
-                    feedback = result.feedback,
-                    startedAt = result.startedAt,
-                    completedAt = result.completedAt,
-                    assignment = AssignmentStudentData(
-                        id = result.assignment.id,
-                        grade = result.assignment.grade,
-                        subject = result.assignment.subject,
-                        topic = result.assignment.topic,
-                        title = result.assignment.title,
-                        content = result.assignment.content,
-                        totalScore = result.assignment.totalScore
-                    )
+
+                    id =
+                        result.id,
+
+                    assignmentId =
+                        result.assignmentId,
+
+                    userId =
+                        result.userId,
+
+                    status =
+                        result.status,
+
+                    answer =
+                        result.answer,
+
+                    score =
+                        result.score,
+
+                    feedback =
+                        result.feedback,
+
+                    startedAt =
+                        result.startedAt,
+
+                    completedAt =
+                        result.completedAt,
+
+                    assignment =
+                        AssignmentStudentData(
+
+                            id =
+                                result.assignment.id,
+
+                            grade =
+                                result.assignment.grade,
+
+                            subject =
+                                result.assignment.subject,
+
+                            topic =
+                                result.assignment.topic,
+
+                            title =
+                                result.assignment.title,
+
+                            content =
+                                result.assignment.content,
+
+                            totalScore =
+                                result.assignment.totalScore
+                        )
                 )
             )
 

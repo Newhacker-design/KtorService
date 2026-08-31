@@ -1032,6 +1032,167 @@ class AssignmentService(
             }
         }
     }
+    // ============================================================
+// GET NEXT ASSIGNMENT FOR USER
+// ============================================================
+
+    suspend fun getNextAssignment(
+        userId: Int,
+        grade: Int,
+        subject: String
+    ): UserAssignmentResult? {
+
+        require(grade in 1..12) {
+            "Invalid grade"
+        }
+
+        require(subject.isNotBlank()) {
+            "Subject is required"
+        }
+
+        return withContext(Dispatchers.IO) {
+
+            transaction {
+
+                println(
+                    "========== GET NEXT ASSIGNMENT =========="
+                )
+
+                println("USER ID = $userId")
+                println("GRADE = $grade")
+                println("SUBJECT = $subject")
+
+                // ----------------------------------------------------
+                // Tìm bài đầu tiên mà user này chưa từng nhận
+                // ----------------------------------------------------
+
+                val assignmentRow =
+                    AssignmentsTable
+                        .selectAll()
+                        .where {
+                            AssignmentsTable.grade eq grade
+                        }
+                        .andWhere {
+                            AssignmentsTable.subject eq subject
+                        }
+                        .orderBy(
+                            AssignmentsTable.id to SortOrder.ASC
+                        )
+                        .firstOrNull { assignment ->
+
+                            val assignmentId =
+                                assignment[
+                                    AssignmentsTable.id
+                                ]
+
+                            val alreadyAssigned =
+                                UserAssignmentsTable
+                                    .selectAll()
+                                    .where {
+                                        (UserAssignmentsTable.userId eq userId) and
+                                                (
+                                                        UserAssignmentsTable.assignmentId eq
+                                                                assignmentId
+                                                        )
+                                    }
+                                    .count() > 0
+
+                            !alreadyAssigned
+                        }
+
+                if (assignmentRow == null) {
+
+                    println(
+                        "NO NEW ASSIGNMENT AVAILABLE"
+                    )
+
+                    return@transaction null
+                }
+
+                val assignment =
+                    rowToResult(assignmentRow)
+
+                println(
+                    "NEXT ASSIGNMENT FOUND"
+                )
+
+                println(
+                    "ASSIGNMENT ID = ${assignment.id}"
+                )
+
+                println(
+                    "TITLE = ${assignment.title}"
+                )
+
+                // ----------------------------------------------------
+                // Đánh dấu đã giao NGAY LẬP TỨC
+                // ----------------------------------------------------
+
+                val statement =
+                    UserAssignmentsTable.insert {
+
+                        it[UserAssignmentsTable.userId] =
+                            userId
+
+                        it[UserAssignmentsTable.assignmentId] =
+                            assignment.id
+
+                        it[UserAssignmentsTable.status] =
+                            "NEW"
+                    }
+
+                val userAssignmentId =
+                    statement[
+                        UserAssignmentsTable.id
+                    ]
+
+                println(
+                    "ASSIGNMENT MARKED AS ASSIGNED"
+                )
+
+                println(
+                    "USER ASSIGNMENT ID = $userAssignmentId"
+                )
+
+                // ----------------------------------------------------
+                // Trả UserAssignment
+                // ----------------------------------------------------
+
+                UserAssignmentResult(
+
+                    id =
+                        userAssignmentId,
+
+                    assignmentId =
+                        assignment.id,
+
+                    userId =
+                        userId,
+
+                    status =
+                        "NEW",
+
+                    answer =
+                        null,
+
+                    score =
+                        null,
+
+                    feedback =
+                        null,
+
+                    startedAt =
+                        null,
+
+                    completedAt =
+                        null,
+
+                    assignment =
+                        assignment
+                )
+            }
+        }
+    }
     private suspend fun findExistingAssignment(
         grade: Int,
         subject: String,
