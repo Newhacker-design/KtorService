@@ -143,34 +143,25 @@ echo "========================================"
 
 echo "DATABASE HOST = $DB_HOST"
 echo "DATABASE PORT = $DB_PORT"
-echo "DATABASE NAME = ${DB_NAME:-ktorservice}"
-echo "DATABASE USER = ${DB_USER:-ktoruser}"
 
 DB_READY=false
 
 for i in $(seq 1 60); do
 
-    echo "PostgreSQL check attempt $i/60..."
+    echo "----------------------------------------"
+    echo "PostgreSQL check attempt $i/60"
+    echo "Testing $DB_HOST:$DB_PORT"
 
-    if PGPASSWORD="$DB_PASSWORD" \
-        pg_isready \
-        -h "$DB_HOST" \
-        -p "$DB_PORT" \
-        -d "${DB_NAME:-ktorservice}" \
-        -U "${DB_USER:-ktoruser}" \
-        2>/dev/null
-    then
-        echo "PostgreSQL is accepting connections!"
-
+    if nc -vz -w 10 "$DB_HOST" "$DB_PORT"; then
+        echo "PostgreSQL TCP connection SUCCESS"
         DB_READY=true
         break
+    else
+        echo "PostgreSQL TCP connection FAILED"
     fi
-
-    echo "PostgreSQL is not ready yet..."
 
     sleep 2
 done
-
 
 if [ "$DB_READY" != "true" ]; then
 
@@ -178,19 +169,24 @@ if [ "$DB_READY" != "true" ]; then
     echo "ERROR: PostgreSQL is NOT reachable"
     echo "========================================"
 
-    echo "Testing TCP connection..."
+    echo "===== TAILSCALE STATUS ====="
 
-    nc -vz -w 5 "$DB_HOST" "$DB_PORT" || true
+    tailscale \
+        --socket="$TAILSCALE_SOCKET" \
+        status || true
 
-    echo "Testing Tailscale..."
+    echo "===== TAILSCALE PING ====="
 
     tailscale \
         --socket="$TAILSCALE_SOCKET" \
         ping "$DB_HOST" || true
 
+    echo "===== TCP TEST ====="
+
+    nc -vz -w 10 "$DB_HOST" "$DB_PORT" || true
+
     exit 1
 fi
-
 # ==================================================
 # Start Ktor
 # ==================================================
