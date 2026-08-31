@@ -5,45 +5,59 @@ echo "========================================"
 echo "Starting Tailscale..."
 echo "========================================"
 
-mkdir -p /var/lib/tailscale
 mkdir -p /var/run/tailscale
+mkdir -p /var/lib/tailscale
 
 tailscaled \
-  --state=/var/lib/tailscale/tailscaled.state \
-  --socket=/var/run/tailscale/tailscaled.sock &
+    --tun=userspace-networking \
+    --state=/var/lib/tailscale/tailscaled.state \
+    --socket=/var/run/tailscale/tailscaled.sock &
 
-echo "Waiting for tailscaled..."
+TAILSCALED_PID=$!
+
+echo "Waiting for tailscaled socket..."
 
 for i in $(seq 1 30); do
-    if tailscale --socket=/var/run/tailscale/tailscaled.sock status >/dev/null 2>&1; then
+    if [ -S /var/run/tailscale/tailscaled.sock ]; then
+        echo "tailscaled socket is ready"
         break
     fi
+
+    if ! kill -0 "$TAILSCALED_PID" 2>/dev/null; then
+        echo "ERROR: tailscaled process died"
+        exit 1
+    fi
+
     sleep 1
 done
 
+if [ ! -S /var/run/tailscale/tailscaled.sock ]; then
+    echo "ERROR: tailscaled socket was not created"
+    exit 1
+fi
+
+if [ -z "$TS_AUTHKEY" ]; then
+    echo "ERROR: TS_AUTHKEY is not set"
+    exit 1
+fi
+
+echo "========================================"
 echo "Connecting to Tailscale..."
-
-tailscale \
-  --socket=/var/run/tailscale/tailscaled.sock \
-  up \
-  --auth-key="${TAILSCALE_AUTHKEY}" \
-  --hostname="ktorservice-render"
-
-echo "========================================"
-echo "TAILSCALE STATUS"
 echo "========================================"
 
 tailscale \
-  --socket=/var/run/tailscale/tailscaled.sock \
-  status
+    --socket=/var/run/tailscale/tailscaled.sock \
+    up \
+    --auth-key="$TS_AUTHKEY" \
+    --hostname="ktorservice-render"
 
 echo "========================================"
-echo "TAILSCALE IP"
+echo "Tailscale connected"
 echo "========================================"
 
 tailscale \
-  --socket=/var/run/tailscale/tailscaled.sock \
-  ip
+    --socket=/var/run/tailscale/tailscaled.sock \
+    status
 
 echo "========================================"
 echo "Starting Ktor..."
