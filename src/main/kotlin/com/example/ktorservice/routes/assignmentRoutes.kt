@@ -37,7 +37,7 @@ fun Route.assignmentRoutes(
 
                 call.respond(
                     HttpStatusCode.Unauthorized,
-                    AssignmentGenerateResponse(
+                    AssignmentDetailResponse(
                         success = false,
                         message = "Invalid or expired token"
                     )
@@ -54,7 +54,7 @@ fun Route.assignmentRoutes(
 
                 call.respond(
                     HttpStatusCode.BadRequest,
-                    AssignmentGenerateResponse(
+                    AssignmentDetailResponse(
                         success = false,
                         message = "Invalid assignment id"
                     )
@@ -72,9 +72,11 @@ fun Route.assignmentRoutes(
 
             if (result == null) {
 
+                println("ASSIGNMENT NOT FOUND")
+
                 call.respond(
                     HttpStatusCode.NotFound,
-                    AssignmentGenerateResponse(
+                    AssignmentDetailResponse(
                         success = false,
                         message = "Assignment not found"
                     )
@@ -84,15 +86,16 @@ fun Route.assignmentRoutes(
             }
 
             println("ASSIGNMENT FOUND")
+            println("ASSIGNMENT ID = ${result.id}")
             println("TITLE = ${result.title}")
             println("GRADE = ${result.grade}")
             println("SUBJECT = ${result.subject}")
 
             call.respond(
                 HttpStatusCode.OK,
-                mapOf(
-                    "success" to true,
-                    "assignment" to AssignmentStudentData(
+                AssignmentDetailResponse(
+                    success = true,
+                    assignment = AssignmentStudentData(
                         id = result.id,
                         grade = result.grade,
                         subject = result.subject,
@@ -114,11 +117,11 @@ fun Route.assignmentRoutes(
 
             call.respond(
                 HttpStatusCode.InternalServerError,
-                mapOf(
-                    "success" to false,
-                    "message" to (
-                            e.message ?: "Unknown error"
-                            )
+                AssignmentDetailResponse(
+                    success = false,
+                    message =
+                        e.message
+                            ?: "Unknown error"
                 )
             )
         }
@@ -443,12 +446,11 @@ fun Route.assignmentRoutes(
 
             call.respond(
                 HttpStatusCode.InternalServerError,
-                mapOf(
-                    "success" to false,
-                    "message" to (
-                            e.message
-                                ?: "Unknown error"
-                            )
+                UserAssignmentResponse(
+                    success = false,
+                    message =
+                        e.message
+                            ?: "Unknown error"
                 )
             )
         }
