@@ -35,7 +35,9 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends tailscale \
     && rm -rf /var/lib/apt/lists/*
 
-
+RUN apt-get update \
+    && apt-get install -y curl python3 postgresql-client netcat-openbsd \
+    && rm -rf /var/lib/apt/lists/*
 # ================================
 # Copy Ktor JAR
 # ================================
