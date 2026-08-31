@@ -1062,11 +1062,11 @@ class AssignmentService(
                 println("GRADE = $grade")
                 println("SUBJECT = $subject")
 
-                // ----------------------------------------------------
-                // Tìm bài đầu tiên mà user này chưa từng nhận
-                // ----------------------------------------------------
+                // ====================================================
+                // TÌM BÀI ĐẦU TIÊN USER CHƯA NHẬN
+                // ====================================================
 
-                val assignmentRow =
+                val row =
                     AssignmentsTable
                         .selectAll()
                         .where {
@@ -1078,10 +1078,10 @@ class AssignmentService(
                         .orderBy(
                             AssignmentsTable.id to SortOrder.ASC
                         )
-                        .firstOrNull { assignment ->
+                        .firstOrNull { assignmentRow ->
 
                             val assignmentId =
-                                assignment[
+                                assignmentRow[
                                     AssignmentsTable.id
                                 ]
 
@@ -1095,12 +1095,16 @@ class AssignmentService(
                                                                 assignmentId
                                                         )
                                     }
-                                    .count() > 0
+                                    .any()
 
                             !alreadyAssigned
                         }
 
-                if (assignmentRow == null) {
+                // ====================================================
+                // KHÔNG CÒN BÀI
+                // ====================================================
+
+                if (row == null) {
 
                     println(
                         "NO NEW ASSIGNMENT AVAILABLE"
@@ -1110,7 +1114,7 @@ class AssignmentService(
                 }
 
                 val assignment =
-                    rowToResult(assignmentRow)
+                    rowToResult(row)
 
                 println(
                     "NEXT ASSIGNMENT FOUND"
@@ -1124,9 +1128,9 @@ class AssignmentService(
                     "TITLE = ${assignment.title}"
                 )
 
-                // ----------------------------------------------------
-                // Đánh dấu đã giao NGAY LẬP TỨC
-                // ----------------------------------------------------
+                // ====================================================
+                // ĐÁNH DẤU ĐÃ GIAO NGAY
+                // ====================================================
 
                 val statement =
                     UserAssignmentsTable.insert {
@@ -1147,19 +1151,26 @@ class AssignmentService(
                     ]
 
                 println(
-                    "ASSIGNMENT MARKED AS ASSIGNED"
+                    "USER ASSIGNMENT CREATED"
                 )
 
                 println(
                     "USER ASSIGNMENT ID = $userAssignmentId"
                 )
 
-                // ----------------------------------------------------
-                // Trả UserAssignment
-                // ----------------------------------------------------
+                println(
+                    "USER ID = $userId"
+                )
+
+                println(
+                    "ASSIGNMENT ID = ${assignment.id}"
+                )
+
+                // ====================================================
+                // TRẢ KẾT QUẢ
+                // ====================================================
 
                 UserAssignmentResult(
-
                     id =
                         userAssignmentId,
 

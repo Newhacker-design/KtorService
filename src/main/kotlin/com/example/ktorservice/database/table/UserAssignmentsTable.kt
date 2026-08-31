@@ -43,7 +43,7 @@ object UserAssignmentsTable : Table("user_assignments") {
 
     init {
         uniqueIndex(
-            "ux_user_assignments_user_assignment",
+            "uq_user_assignment",
             userId,
             assignmentId
         )

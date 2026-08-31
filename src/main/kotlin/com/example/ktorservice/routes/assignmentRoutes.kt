@@ -22,9 +22,9 @@ fun Route.assignmentRoutes(
     authService: AuthService,
     assignmentService: AssignmentService
 ) {
-    // ============================================================
+// ============================================================
 // GET /assignments/next
-// GET NEXT UNUSED ASSIGNMENT FOR CURRENT USER
+// GET NEXT ASSIGNMENT FOR CURRENT USER
 // ============================================================
 
     get("/assignments/next") {
@@ -83,7 +83,7 @@ fun Route.assignmentRoutes(
             }
 
             println(
-                "========== GET NEXT ASSIGNMENT =========="
+                "========== GET NEXT ASSIGNMENT API =========="
             )
 
             println("USER ID = $userId")
@@ -100,7 +100,7 @@ fun Route.assignmentRoutes(
             if (result == null) {
 
                 println(
-                    "NO NEW ASSIGNMENT FOR USER"
+                    "NO NEW ASSIGNMENT AVAILABLE"
                 )
 
                 call.respond(
@@ -126,18 +126,12 @@ fun Route.assignmentRoutes(
                 "ASSIGNMENT ID = ${result.assignmentId}"
             )
 
-            println(
-                "TITLE = ${result.assignment.title}"
-            )
-
             call.respond(
                 HttpStatusCode.OK,
                 UserAssignmentResponse(
-
                     success = true,
 
-                    id =
-                        result.id,
+                    id = result.id,
 
                     assignmentId =
                         result.assignmentId,
@@ -165,7 +159,6 @@ fun Route.assignmentRoutes(
 
                     assignment =
                         AssignmentStudentData(
-
                             id =
                                 result.assignment.id,
 
