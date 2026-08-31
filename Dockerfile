@@ -1,7 +1,7 @@
 ﻿# ================================
 # BUILD STAGE
 # ================================
-FROM gradle:8.14-jdk25 AS builder
+FROM eclipse-temurin:25-jdk AS builder
 
 WORKDIR /app
 
@@ -19,10 +19,22 @@ FROM eclipse-temurin:25-jdk
 
 WORKDIR /app
 
-# Copy JAR được Gradle tạo ra
+# Install Tailscale
+RUN apt-get update \
+    && apt-get install -y curl ca-certificates \
+    && curl -fsSL https://pkgs.tailscale.com/stable/debian/bookworm.noarmor.gpg \
+       -o /usr/share/keyrings/tailscale-archive-keyring.gpg \
+    && curl -fsSL https://pkgs.tailscale.com/stable/debian/bookworm.tailscale-keyring.list \
+       -o /etc/apt/sources.list.d/tailscale.list \
+    && apt-get update \
+    && apt-get install -y tailscale \
+    && rm -rf /var/lib/apt/lists/*
+RUN apt-get update \
+    && apt-get install -y curl python3
+# Copy Ktor JAR
 COPY --from=builder /app/build/libs/*-all.jar /app/build/libs/KtorService-all.jar
 
-# Copy Tailscale startup script
+# Copy startup script
 COPY start.sh /app/start.sh
 
 RUN chmod +x /app/start.sh
