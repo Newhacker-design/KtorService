@@ -10,7 +10,7 @@ mkdir -p /var/lib/tailscale
 
 tailscaled \
     --tun=userspace-networking \
-    --state=/var/lib/tailscale/tailscaled.state \
+    --state=mem: \
     --socket=/var/run/tailscale/tailscaled.sock &
 
 TAILSCALED_PID=$!
@@ -18,6 +18,7 @@ TAILSCALED_PID=$!
 echo "Waiting for tailscaled socket..."
 
 for i in $(seq 1 30); do
+
     if [ -S /var/run/tailscale/tailscaled.sock ]; then
         echo "tailscaled socket is ready"
         break
@@ -66,14 +67,7 @@ echo "========================================"
 echo "JAVA VERSION:"
 java -version
 
-echo "CHECKING JAR..."
-
-if [ ! -f build/libs/KtorService-all.jar ]; then
-    echo "ERROR: JAR NOT FOUND"
-    ls -lah build/libs
-    exit 1
-fi
-
+echo "CHECKING JAR:"
 ls -lh build/libs/KtorService-all.jar
 
 echo "STARTING JAVA..."
