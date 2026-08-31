@@ -11,23 +11,18 @@ object AssignmentsTable : Table("assignments") {
         integer("grade")
 
     val subject =
-        varchar(
-            "subject",
-            50
-        )
+        varchar("subject", 50)
 
     val topic =
-        varchar(
-            "topic",
-            255
-        )
+        varchar("topic", 255)
             .nullable()
 
     val title =
-        varchar(
-            "title",
-            500
-        )
+        varchar("title", 500)
+
+    val questions =
+        text("questions")
+            .default("[]")
 
     val content =
         text("content")

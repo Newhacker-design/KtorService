@@ -12,21 +12,34 @@ data class AssignmentGenerateResponse(
 @Serializable
 data class AssignmentData(
     val title: String,
+
+    val questions: List<AssignmentQuestion> = emptyList(),
+
     val content: String,
+
     val answerKey: String,
+
     val gradingGuide: String,
+
     val totalScore: Double
 )
+
 @Serializable
 data class AssignmentStudentData(
     val id: Int,
     val grade: Int,
     val subject: String,
     val topic: String? = null,
+
     val title: String,
+
+    val questions: List<AssignmentQuestion> = emptyList(),
+
     val content: String,
+
     val totalScore: Double
 )
+
 
 @Serializable
 data class AssignmentDetailResponse(
@@ -83,6 +96,19 @@ data class AssignmentListResponse(
 )
 @Serializable
 data class AssignmentSubmitRequest(
+    val answer: String
+)
+
+@Serializable
+data class AssignmentQuestion(
+    val id: Int,
+    val question: String,
+    val points: Double
+)
+
+@Serializable
+data class AssignmentAnswerKey(
+    val id: Int,
     val answer: String
 )
 

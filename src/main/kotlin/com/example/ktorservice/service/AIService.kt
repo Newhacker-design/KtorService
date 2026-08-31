@@ -8,6 +8,21 @@ import kotlinx.serialization.json.*
 
 class AIService {
 
+    @Serializable
+    data class GeneratedQuestion(
+        val id: Int,
+        val question: String,
+        val points: Double
+    )
+
+    @Serializable
+    data class GeneratedAnswer(
+        val id: Int,
+        val answer: String
+    )
+
+
+
     private val apiKey: String?
         get() = System.getenv("GEMINI_API_KEY")
 
@@ -328,56 +343,98 @@ class AIService {
 
         val topicText =
             if (topic.isNullOrBlank()) {
-
-                "Tự chọn một nội dung phù hợp với chương trình lớp $grade."
-
+                "Tự chọn nội dung phù hợp với chương trình lớp $grade."
             } else {
-
                 "Chủ đề yêu cầu: $topic"
             }
 
         return """
-            Bạn là giáo viên Việt Nam có kinh nghiệm.
+        Bạn là giáo viên Việt Nam có kinh nghiệm.
 
-            Hãy tạo một bài tập cho học sinh:
+        Hãy tạo MỘT BÀI TẬP gồm đúng 3 CÂU HỎI cho học sinh:
 
-            Lớp: $grade
-            Môn: $subject
+        Lớp: $grade
+        Môn: $subject
 
-            $topicText
+        $topicText
 
-            Yêu cầu:
+        YÊU CẦU:
 
-            1. Nội dung phù hợp với học sinh lớp $grade.
-            2. Bài tập phải rõ ràng, có thể giao trực tiếp cho học sinh.
-            3. Có đáp án chính xác.
-            4. Có hướng dẫn chấm điểm.
-            5. Tổng điểm là 10.
-            6. Không đưa thông tin không chắc chắn.
-            7. Nếu là Ngữ văn, cần phù hợp với trình độ học sinh.
-            8. Nếu là Toán, đáp án phải có kết quả và cách giải.
-            9. Nếu là Tiếng Anh, đáp án phải rõ ràng.
+        1. Bài tập gồm đúng 3 câu hỏi.
+        2. Cả 3 câu thuộc cùng một chủ đề.
+        3. Nội dung phù hợp với học sinh lớp $grade.
+        4. Mỗi câu phải có điểm riêng.
+        5. Tổng điểm của 3 câu phải bằng 10.
+        6. Có đáp án chính xác cho từng câu.
+        7. Có hướng dẫn chấm điểm.
+        8. Nếu là Toán, đáp án phải có kết quả và cách giải cần thiết.
+        9. Nếu là Ngữ văn, chấm được các cách diễn đạt tương đương.
+        10. Nếu là Tiếng Anh, đáp án phải rõ ràng.
+        11. Không tạo câu hỏi mơ hồ.
+        12. Không thêm câu hỏi thứ 4.
+        13. Không gộp nhiều câu vào cùng một question.
 
-            Chỉ trả về JSON hợp lệ theo đúng cấu trúc:
+        CẤU TRÚC JSON BẮT BUỘC:
 
+        {
+          "title": "Tên bài",
+
+          "questions": [
             {
-              "title": "Tên bài",
-              "content": "Nội dung bài tập",
-              "answerKey": "Đáp án",
-              "gradingGuide": "Hướng dẫn chấm điểm",
-              "totalScore": 10
+              "id": 1,
+              "question": "Nội dung câu hỏi 1",
+              "points": 3
+            },
+            {
+              "id": 2,
+              "question": "Nội dung câu hỏi 2",
+              "points": 3
+            },
+            {
+              "id": 3,
+              "question": "Nội dung câu hỏi 3",
+              "points": 4
             }
+          ],
 
-            Không thêm markdown.
-            Không thêm ```json.
-            Không giải thích bên ngoài JSON.
-        """.trimIndent()
+          "answerKey": [
+            {
+              "id": 1,
+              "answer": "Đáp án câu 1"
+            },
+            {
+              "id": 2,
+              "answer": "Đáp án câu 2"
+            },
+            {
+              "id": 3,
+              "answer": "Đáp án câu 3"
+            }
+          ],
+
+          "gradingGuide": "Hướng dẫn chấm từng câu",
+
+          "totalScore": 10
+        }
+
+        QUY TẮC:
+
+        - questions phải có đúng 3 phần tử.
+        - answerKey phải có đúng 3 phần tử.
+        - id phải tương ứng giữa questions và answerKey.
+        - Tổng points phải bằng 10.
+        - Chỉ trả về JSON hợp lệ.
+        - Không markdown.
+        - Không ```json.
+        - Không giải thích bên ngoài JSON.
+    """.trimIndent()
     }
+
+
 
     // ============================================================
     // PARSE GEMINI RESPONSE
     // ============================================================
-
     private fun parseResponse(
         responseText: String
     ): GeneratedAssignment {
@@ -431,62 +488,170 @@ class AIService {
                 text.trim()
             ).jsonObject
 
+        val title =
+            assignmentJson["title"]
+                ?.jsonPrimitive
+                ?.content
+                ?: "Bài tập"
+
+        val questions =
+            assignmentJson["questions"]
+                ?.jsonArray
+                ?.map { element ->
+
+                    val obj =
+                        element.jsonObject
+
+                    GeneratedQuestion(
+                        id =
+                            obj["id"]
+                                ?.jsonPrimitive
+                                ?.int
+                                ?: throw IllegalStateException(
+                                    "Question id missing"
+                                ),
+
+                        question =
+                            obj["question"]
+                                ?.jsonPrimitive
+                                ?.content
+                                ?: throw IllegalStateException(
+                                    "Question content missing"
+                                ),
+
+                        points =
+                            obj["points"]
+                                ?.jsonPrimitive
+                                ?.doubleOrNull
+                                ?: throw IllegalStateException(
+                                    "Question points missing"
+                                )
+                    )
+                }
+                ?: throw IllegalStateException(
+                    "Questions missing"
+                )
+        val questionIds =
+            questions.map { it.id }.toSet()
+
+
+        val answerKey =
+            assignmentJson["answerKey"]
+                ?.jsonArray
+                ?.map { element ->
+
+                    val obj =
+                        element.jsonObject
+
+                    GeneratedAnswer(
+                        id =
+                            obj["id"]
+                                ?.jsonPrimitive
+                                ?.int
+                                ?: throw IllegalStateException(
+                                    "Answer id missing"
+                                ),
+
+                        answer =
+                            obj["answer"]
+                                ?.jsonPrimitive
+                                ?.content
+                                ?: ""
+                    )
+                }
+                ?: throw IllegalStateException(
+                    "Answer key missing"
+                )
+        val answerIds =
+            answerKey.map { it.id }.toSet()
+        if (questionIds != answerIds) {
+            throw IllegalStateException(
+                "Question IDs and answer IDs do not match"
+            )
+        }
+
+        val gradingGuide =
+            assignmentJson["gradingGuide"]
+                ?.jsonPrimitive
+                ?.content
+                ?: ""
+
+        val totalScore =
+            assignmentJson["totalScore"]
+                ?.jsonPrimitive
+                ?.doubleOrNull
+                ?: 10.0
+
+        val pointsTotal =
+            questions.sumOf {
+                it.points
+            }
+
+        if (kotlin.math.abs(pointsTotal - totalScore) > 0.01) {
+
+            throw IllegalStateException(
+                "Question points total $pointsTotal != totalScore $totalScore"
+            )
+        }
+
+        val generatedContent =
+            questions.joinToString(
+                separator = "\n\n"
+            ) {
+                "Câu ${it.id} (${it.points} điểm):\n${it.question}"
+            }
+
+        val generatedAnswerKey =
+            answerKey.joinToString(
+                separator = "\n\n"
+            ) {
+                "Câu ${it.id}:\n${it.answer}"
+            }
+
         return GeneratedAssignment(
 
-            title =
-                assignmentJson["title"]
-                    ?.jsonPrimitive
-                    ?.content
-                    ?: "Bài tập",
+            title = title,
 
-            content =
-                assignmentJson["content"]
-                    ?.jsonPrimitive
-                    ?.content
-                    ?: "",
+            questions = questions,
 
-            answerKey =
-                assignmentJson["answerKey"]
-                    ?.jsonPrimitive
-                    ?.content
-                    ?: "",
+            answerKey = answerKey,
 
-            gradingGuide =
-                assignmentJson["gradingGuide"]
-                    ?.jsonPrimitive
-                    ?.content
-                    ?: "",
+            gradingGuide = gradingGuide,
 
-            totalScore =
-                assignmentJson["totalScore"]
-                    ?.jsonPrimitive
-                    ?.doubleOrNull
-                    ?: 10.0
+            totalScore = totalScore
         )
     }
+
 
     // ============================================================
     // MODEL
     // ============================================================
-
     @Serializable
     data class GeneratedAssignment(
-
         val title: String,
 
-        val content: String,
+        val questions: List<GeneratedQuestion>,
 
-        val answerKey: String,
+        val answerKey: List<GeneratedAnswer>,
 
         val gradingGuide: String,
 
         val totalScore: Double
     )
     @Serializable
-    data class GradingResult(
+    data class QuestionGradingResult(
+        val id: Int,
         val score: Double,
         val feedback: String
     )
+
+    @Serializable
+    data class GradingResult(
+        val score: Double,
+        val feedback: String,
+        val questions: List<QuestionGradingResult> = emptyList()
+    )
+
     suspend fun gradeAssignment(
         assignment: AssignmentService.AssignmentResult,
         studentAnswer: String
