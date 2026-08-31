@@ -18,7 +18,6 @@ TAILSCALED_PID=$!
 echo "Waiting for tailscaled socket..."
 
 for i in $(seq 1 30); do
-
     if [ -S /var/run/tailscale/tailscaled.sock ]; then
         echo "tailscaled socket is ready"
         break
@@ -68,8 +67,8 @@ echo "JAVA VERSION:"
 java -version
 
 echo "CHECKING JAR:"
-ls -lh build/libs/KtorService-all.jar
+ls -lh /app/build/libs/KtorService-all.jar
 
 echo "STARTING JAVA..."
 
-exec java -jar build/libs/KtorService-all.jar
+exec java -jar /app/build/libs/KtorService-all.jar
