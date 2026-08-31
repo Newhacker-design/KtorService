@@ -613,6 +613,14 @@ class AIService {
                     "GEMINI GRADING HTTP CODE = $responseCode"
                 )
 
+                println(
+                    "========== GEMINI GRADING RAW RESPONSE =========="
+                )
+                println(responseText)
+                println(
+                    "=================================================="
+                )
+
                 if (responseCode !in 200..299) {
 
                     throw IllegalStateException(
