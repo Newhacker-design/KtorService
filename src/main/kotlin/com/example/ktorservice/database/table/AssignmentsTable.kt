@@ -32,6 +32,10 @@ object AssignmentsTable : Table("assignments") {
     val totalScore =
         double("total_score")
 
+    val questionMetadata =
+        text("question_metadata")
+            .nullable()
+
     val createdAt =
         long("created_at")
 

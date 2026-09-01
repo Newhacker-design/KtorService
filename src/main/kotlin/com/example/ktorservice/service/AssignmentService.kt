@@ -1,7 +1,9 @@
 package com.example.ktorservice.service
 
 import com.example.ktorservice.database.table.AssignmentsTable
+import com.example.ktorservice.database.table.AssignmentsTable.questionMetadata
 import com.example.ktorservice.database.table.UserAssignmentsTable
+import com.example.ktorservice.model.QuestionMetadata
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -10,10 +12,15 @@ import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.transactions.transaction
 import java.util.concurrent.ConcurrentHashMap
-
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 class AssignmentService(
     private val aiService: AIService
 ) {
+    private val json = Json {
+        ignoreUnknownKeys = true
+        isLenient = true
+    }
     private val assignmentGenerationMutex = Mutex()
     // ============================================================
 // GET NEXT ASSIGNMENT
@@ -149,7 +156,16 @@ class AssignmentService(
                     .joinToString("\n\n") { question ->
                         "Câu ${question.id} (${question.points} điểm):\n${question.question}"
                     }
-
+            val questionMetadata =
+                json.encodeToString(
+                    generated.questions.map { question ->
+                        QuestionMetadata(
+                            id = question.id,
+                            answerType = question.answerType,
+                            gradingMethod = question.gradingMethod
+                        )
+                    }
+                )
             val answerKey =
                 generated.answerKey
                     .joinToString("\n\n") { answer ->
@@ -191,6 +207,9 @@ class AssignmentService(
                                 it[AssignmentsTable.totalScore] =
                                     generated.totalScore
 
+                                it[AssignmentsTable.questionMetadata] =
+                                    questionMetadata
+
                                 it[AssignmentsTable.createdAt] =
                                     System.currentTimeMillis()
                             }
@@ -213,7 +232,15 @@ class AssignmentService(
                             content = content,
                             answerKey = answerKey,
                             gradingGuide = gradingGuide,
-                            totalScore = generated.totalScore
+                            totalScore = generated.totalScore,
+                                    questionMetadata = generated.questions.map { question ->
+                                QuestionMetadata(
+                                    id = question.id,
+                                    answerType = question.answerType,
+                                    gradingMethod = question.gradingMethod
+                                )
+                            }
+
                         )
                     }
                 }
@@ -324,7 +351,8 @@ class AssignmentService(
                     feedback = null,
                     startedAt = null,
                     completedAt = null,
-                    assignment = assignment
+                    assignment = assignment,
+                    questionMetadata = assignment.questionMetadata
                 )
             }
         }
@@ -780,6 +808,25 @@ class AssignmentService(
         row: ResultRow
     ): AssignmentResult {
 
+        val questionMetadata =
+            row[AssignmentsTable.questionMetadata]
+                ?.let { jsonString ->
+
+                    try {
+                        json.decodeFromString<List<QuestionMetadata>>(
+                            jsonString
+                        )
+                    } catch (e: Exception) {
+
+                        println(
+                            "FAILED TO DECODE QUESTION METADATA: ${e.message}"
+                        )
+
+                        emptyList()
+                    }
+                }
+                ?: emptyList()
+
         return AssignmentResult(
 
             id =
@@ -807,7 +854,10 @@ class AssignmentService(
                 row[AssignmentsTable.gradingGuide],
 
             totalScore =
-                row[AssignmentsTable.totalScore]
+                row[AssignmentsTable.totalScore],
+
+            questionMetadata =
+                questionMetadata
         )
     }
 
@@ -850,7 +900,10 @@ class AssignmentService(
                 row[UserAssignmentsTable.completedAt],
 
             assignment =
-                assignment
+                assignment,
+
+            questionMetadata =
+                assignment.questionMetadata
         )
     }
 
@@ -876,9 +929,10 @@ class AssignmentService(
 
         val gradingGuide: String,
 
-        val totalScore: Double
-    )
+        val totalScore: Double,
 
+        val questionMetadata: List<QuestionMetadata> = emptyList()
+    )
     // ============================================================
     // USER ASSIGNMENT RESULT
     // ============================================================
@@ -903,6 +957,8 @@ class AssignmentService(
 
         val completedAt: Long?,
 
-        val assignment: AssignmentResult
+        val assignment: AssignmentResult,
+
+        val questionMetadata: List<QuestionMetadata>
     )
 }

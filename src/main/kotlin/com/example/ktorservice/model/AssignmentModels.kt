@@ -1,7 +1,13 @@
 package com.example.ktorservice.model
 
+import com.example.ktorservice.service.AIService
 import kotlinx.serialization.Serializable
-
+@Serializable
+data class QuestionMetadata(
+    val id: Int,
+    val answerType: AIService.AnswerType,
+    val gradingMethod: AIService.GradingMethod
+)
 @Serializable
 data class AssignmentGenerateResponse(
     val success: Boolean,

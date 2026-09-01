@@ -7,12 +7,29 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.*
 
 class AIService {
+    @Serializable
+    enum class AnswerType {
+        TEXT,
+        HANDWRITING,
+        DRAWING,
+        MIXED
+    }
 
+    @Serializable
+    enum class GradingMethod {
+        EXACT,
+        AI_TEXT,
+        OCR_AI,
+        OPENCV,
+        OPENCV_VISION_AI
+    }
     @Serializable
     data class GeneratedQuestion(
         val id: Int,
         val question: String,
-        val points: Double
+        val points: Double,
+        val answerType: AnswerType,
+        val gradingMethod: GradingMethod
     )
 
     @Serializable
@@ -376,46 +393,52 @@ class AIService {
 
         CẤU TRÚC JSON BẮT BUỘC:
 
-        {
-          "title": "Tên bài",
+       {
+  "title": "Tên bài",
 
-          "questions": [
-            {
-              "id": 1,
-              "question": "Nội dung câu hỏi 1",
-              "points": 3
-            },
-            {
-              "id": 2,
-              "question": "Nội dung câu hỏi 2",
-              "points": 3
-            },
-            {
-              "id": 3,
-              "question": "Nội dung câu hỏi 3",
-              "points": 4
-            }
-          ],
+  "questions": [
+    {
+      "id": 1,
+      "question": "Nội dung câu hỏi 1",
+      "points": 3,
+      "answerType": "TEXT",
+      "gradingMethod": "AI_TEXT"
+    },
+    {
+      "id": 2,
+      "question": "Nội dung câu hỏi 2",
+      "points": 3,
+      "answerType": "HANDWRITING",
+      "gradingMethod": "OCR_AI"
+    },
+    {
+      "id": 3,
+      "question": "Nội dung câu hỏi 3",
+      "points": 4,
+      "answerType": "DRAWING",
+      "gradingMethod": "OPENCV_VISION_AI"
+    }
+  ],
 
-          "answerKey": [
-            {
-              "id": 1,
-              "answer": "Đáp án câu 1"
-            },
-            {
-              "id": 2,
-              "answer": "Đáp án câu 2"
-            },
-            {
-              "id": 3,
-              "answer": "Đáp án câu 3"
-            }
-          ],
+  "answerKey": [
+    {
+      "id": 1,
+      "answer": "Đáp án câu 1"
+    },
+    {
+      "id": 2,
+      "answer": "Đáp án câu 2"
+    },
+    {
+      "id": 3,
+      "answer": "Đáp án câu 3"
+    }
+  ],
 
-          "gradingGuide": "Hướng dẫn chấm từng câu",
+  "gradingGuide": "Hướng dẫn chấm từng câu",
 
-          "totalScore": 10
-        }
+  "totalScore": 10
+}
 
         QUY TẮC:
 
@@ -525,6 +548,40 @@ class AIService {
                                 ?.doubleOrNull
                                 ?: throw IllegalStateException(
                                     "Question points missing"
+                                ),
+
+                        answerType =
+                            obj["answerType"]
+                                ?.jsonPrimitive
+                                ?.content
+                                ?.let {
+                                    runCatching {
+                                        AnswerType.valueOf(it.uppercase())
+                                    }.getOrElse {
+                                        throw IllegalStateException(
+                                            "Invalid answerType: $it"
+                                        )
+                                    }
+                                }
+                                ?: throw IllegalStateException(
+                                    "Question answerType missing"
+                                ),
+
+                        gradingMethod =
+                            obj["gradingMethod"]
+                                ?.jsonPrimitive
+                                ?.content
+                                ?.let {
+                                    runCatching {
+                                        GradingMethod.valueOf(it.uppercase())
+                                    }.getOrElse {
+                                        throw IllegalStateException(
+                                            "Invalid gradingMethod: $it"
+                                        )
+                                    }
+                                }
+                                ?: throw IllegalStateException(
+                                    "Question gradingMethod missing"
                                 )
                     )
                 }
