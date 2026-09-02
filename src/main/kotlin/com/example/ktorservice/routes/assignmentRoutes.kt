@@ -1,15 +1,18 @@
 package com.example.ktorservice.routes
 
+import com.example.ktorservice.database.table.AssignmentsTable.difficulty
 import com.example.ktorservice.model.AssignmentActionResponse
 import com.example.ktorservice.model.AssignmentData
 import com.example.ktorservice.model.AssignmentDetailResponse
 import com.example.ktorservice.model.AssignmentGenerateResponse
 import com.example.ktorservice.model.AssignmentListResponse
+import com.example.ktorservice.model.AssignmentQuestion
 import com.example.ktorservice.model.AssignmentStorageData
 import com.example.ktorservice.model.AssignmentStudentData
 import com.example.ktorservice.model.AssignmentSubmitRequest
 import com.example.ktorservice.model.UserAssignmentResponse
 import com.example.ktorservice.security.requireUserId
+import com.example.ktorservice.service.AIService
 import com.example.ktorservice.service.AssignmentService
 import com.example.ktorservice.service.AuthService
 import io.ktor.http.HttpStatusCode
@@ -69,7 +72,27 @@ fun Route.assignmentRoutes(
             val topic =
                 call.request
                     .queryParameters["topic"]
+            val difficulty =
+                call.request
+                    .queryParameters["difficulty"]
+                    ?.uppercase()
+                    ?.let {
+                        runCatching {
+                            AIService.Difficulty.valueOf(it)
+                        }.getOrNull()
+                    }
+            if (difficulty == null) {
 
+                call.respond(
+                    HttpStatusCode.BadRequest,
+                    UserAssignmentResponse(
+                        success = false,
+                        message = "Invalid difficulty. Use EASY, MEDIUM or HARD"
+                    )
+                )
+
+                return@get
+            }
             if (grade == null || grade !in 1..12) {
 
                 call.respond(
@@ -110,7 +133,8 @@ fun Route.assignmentRoutes(
                     userId = userId,
                     grade = grade,
                     subject = subject,
-                    topic = topic
+                    topic = topic,
+                    difficulty = difficulty
                 )
 
             println(
@@ -161,29 +185,27 @@ fun Route.assignmentRoutes(
                     completedAt =
                         result.completedAt,
 
-                    assignment =
-                        AssignmentStudentData(
-                            id =
-                                result.assignment.id,
+                    assignment = AssignmentStudentData(
+                        id = result.assignment.id,
+                        grade = result.assignment.grade,
+                        subject = result.assignment.subject,
+                        topic = result.assignment.topic,
+                        title = result.assignment.title,
+                        difficulty = result.assignment.difficulty,
 
-                            grade =
-                                result.assignment.grade,
+                        questions = result.assignment.questionMetadata.map { metadata ->
+                            AssignmentQuestion(
+                                id = metadata.id,
+                                question = metadata.question,
+                                points = metadata.points,
+                                answerType = metadata.answerType,
+                                gradingMethod = metadata.gradingMethod
+                            )
+                        },
 
-                            subject =
-                                result.assignment.subject,
-
-                            topic =
-                                result.assignment.topic,
-
-                            title =
-                                result.assignment.title,
-
-                            content =
-                                result.assignment.content,
-
-                            totalScore =
-                                result.assignment.totalScore
-                        )
+                        content = result.assignment.content,
+                        totalScore = result.assignment.totalScore
+                    )
                 )
             )
 
@@ -285,6 +307,18 @@ fun Route.assignmentRoutes(
                         subject = result.subject,
                         topic = result.topic,
                         title = result.title,
+                        difficulty = result.difficulty,
+
+                        questions = result.questionMetadata.map { metadata ->
+                            AssignmentQuestion(
+                                id = metadata.id,
+                                question = metadata.question,
+                                points = metadata.points,
+                                answerType = metadata.answerType,
+                                gradingMethod = metadata.gradingMethod
+                            )
+                        },
+
                         content = result.content,
                         totalScore = result.totalScore
                     )
@@ -347,6 +381,27 @@ fun Route.assignmentRoutes(
             val topic =
                 call.request
                     .queryParameters["topic"]
+
+            val difficulty =
+                call.request
+                    .queryParameters["difficulty"]
+                    ?.uppercase()
+                    ?.let {
+                        runCatching {
+                            com.example.ktorservice.service.AIService.Difficulty.valueOf(it)
+                        }.getOrNull()
+                    }
+            if (difficulty == null) {
+                call.respond(
+                    HttpStatusCode.BadRequest,
+                    UserAssignmentResponse(
+                        success = false,
+                        message = "Invalid difficulty. Use EASY, MEDIUM or HARD"
+                    )
+                )
+
+                return@get
+            }
 
             println(
                 "========== GET ASSIGNMENT STORAGE =========="

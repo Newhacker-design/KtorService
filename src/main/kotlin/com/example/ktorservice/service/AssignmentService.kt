@@ -3,6 +3,7 @@ package com.example.ktorservice.service
 import com.example.ktorservice.database.table.AssignmentsTable
 import com.example.ktorservice.database.table.AssignmentsTable.questionMetadata
 import com.example.ktorservice.database.table.UserAssignmentsTable
+import com.example.ktorservice.model.AssignmentQuestion
 import com.example.ktorservice.model.QuestionMetadata
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
@@ -37,7 +38,8 @@ class AssignmentService(
         userId: Int,
         grade: Int,
         subject: String,
-        topic: String? = null
+        topic: String?,
+        difficulty: AIService.Difficulty
     ): UserAssignmentResult {
 
         require(grade in 1..12) {
@@ -53,7 +55,7 @@ class AssignmentService(
         println("GRADE = $grade")
         println("SUBJECT = $subject")
         println("TOPIC = $topic")
-
+        println("DIFFICULTY = $difficulty")
         // ========================================================
         // BƯỚC 1
         // Tìm bài đã có trong kho nhưng CHƯA giao cho user
@@ -64,7 +66,8 @@ class AssignmentService(
                 userId = userId,
                 grade = grade,
                 subject = subject,
-                topic = topic
+                topic = topic,
+                difficulty = difficulty
             )
 
         if (existingAssignment != null) {
@@ -116,7 +119,8 @@ class AssignmentService(
                     userId = userId,
                     grade = grade,
                     subject = subject,
-                    topic = topic
+                    topic = topic,
+                    difficulty = difficulty
                 )
 
             if (assignmentAfterLock != null) {
@@ -149,7 +153,8 @@ class AssignmentService(
                 aiService.generateAssignment(
                     grade = grade,
                     subject = subject,
-                    topic = topic
+                    topic = topic,
+                    difficulty = difficulty
                 )
             val content =
                 generated.questions
@@ -161,6 +166,8 @@ class AssignmentService(
                     generated.questions.map { question ->
                         QuestionMetadata(
                             id = question.id,
+                            question = question.question,
+                            points = question.points,
                             answerType = question.answerType,
                             gradingMethod = question.gradingMethod
                         )
@@ -191,6 +198,9 @@ class AssignmentService(
 
                                 it[AssignmentsTable.topic] =
                                     topic
+
+                                it[AssignmentsTable.difficulty] =
+                                    difficulty.name
 
                                 it[AssignmentsTable.title] =
                                     generated.title
@@ -233,14 +243,16 @@ class AssignmentService(
                             answerKey = answerKey,
                             gradingGuide = gradingGuide,
                             totalScore = generated.totalScore,
-                                    questionMetadata = generated.questions.map { question ->
+                            difficulty = difficulty,
+                            questionMetadata = generated.questions.map { question ->
                                 QuestionMetadata(
                                     id = question.id,
+                                    question = question.question,
+                                    points = question.points,
                                     answerType = question.answerType,
                                     gradingMethod = question.gradingMethod
                                 )
                             }
-
                         )
                     }
                 }
@@ -361,7 +373,8 @@ class AssignmentService(
         userId: Int,
         grade: Int,
         subject: String,
-        topic: String?
+        topic: String?,
+        difficulty: AIService.Difficulty
     ): AssignmentResult? {
 
         return withContext(Dispatchers.IO) {
@@ -373,7 +386,11 @@ class AssignmentService(
                     .where {
 
                         (AssignmentsTable.grade eq grade) and
+
                                 (AssignmentsTable.subject eq subject) and
+
+                                (AssignmentsTable.difficulty eq difficulty.name) and
+
                                 (
                                         if (topic == null) {
                                             AssignmentsTable.topic.isNull()
@@ -421,7 +438,8 @@ class AssignmentService(
     private fun getGenerationLock(
         grade: Int,
         subject: String,
-        topic: String?
+        topic: String?,
+        difficulty: AIService.Difficulty
     ): Mutex {
 
         val key =
@@ -429,9 +447,14 @@ class AssignmentService(
 
                 append(grade)
                 append("|")
+
                 append(subject.trim().lowercase())
                 append("|")
+
                 append(topic?.trim()?.lowercase() ?: "")
+                append("|")
+
+                append(difficulty.name)
             }
 
         return generationLocks.computeIfAbsent(key) {
@@ -813,9 +836,11 @@ class AssignmentService(
                 ?.let { jsonString ->
 
                     try {
+
                         json.decodeFromString<List<QuestionMetadata>>(
                             jsonString
                         )
+
                     } catch (e: Exception) {
 
                         println(
@@ -826,6 +851,24 @@ class AssignmentService(
                     }
                 }
                 ?: emptyList()
+
+        val difficulty =
+            row[AssignmentsTable.difficulty]
+                .let { value ->
+
+                    runCatching {
+                        AIService.Difficulty.valueOf(
+                            value.uppercase()
+                        )
+                    }.getOrElse {
+
+                        println(
+                            "INVALID ASSIGNMENT DIFFICULTY: $value"
+                        )
+
+                        AIService.Difficulty.MEDIUM
+                    }
+                }
 
         return AssignmentResult(
 
@@ -855,6 +898,9 @@ class AssignmentService(
 
             totalScore =
                 row[AssignmentsTable.totalScore],
+
+            difficulty =
+                difficulty,
 
             questionMetadata =
                 questionMetadata
@@ -912,25 +958,16 @@ class AssignmentService(
     // ============================================================
 
     data class AssignmentResult(
-
         val id: Int,
-
         val grade: Int,
-
         val subject: String,
-
         val topic: String?,
-
         val title: String,
-
         val content: String,
-
         val answerKey: String,
-
         val gradingGuide: String,
-
         val totalScore: Double,
-
+        val difficulty: AIService.Difficulty,
         val questionMetadata: List<QuestionMetadata> = emptyList()
     )
     // ============================================================
@@ -961,4 +998,18 @@ class AssignmentService(
 
         val questionMetadata: List<QuestionMetadata>
     )
+    private fun buildQuestions(
+        assignment: AssignmentResult
+    ): List<AssignmentQuestion> {
+
+        return assignment.questionMetadata.map { metadata ->
+            AssignmentQuestion(
+                id = metadata.id,
+                question = metadata.question,
+                points = metadata.points,
+                answerType = metadata.answerType,
+                gradingMethod = metadata.gradingMethod
+            )
+        }
+    }
 }

@@ -17,6 +17,9 @@ object AssignmentsTable : Table("assignments") {
         varchar("topic", 255)
             .nullable()
 
+    val difficulty =
+        varchar("difficulty", 20)
+            .default("MEDIUM")
     val title =
         varchar("title", 500)
 
