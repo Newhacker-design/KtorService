@@ -164,27 +164,51 @@ class ParentChildService {
 
         return transaction {
 
-            (ParentChildrenTable innerJoin UsersTable)
+            val childUserIds =
+                ParentChildrenTable
+                    .select(
+                        ParentChildrenTable.childUserId
+                    )
+                    .where {
+                        ParentChildrenTable.parentUserId eq
+                                parentUserId
+                    }
+                    .orderBy(
+                        ParentChildrenTable.id to SortOrder.ASC
+                    )
+                    .map {
+                        it[ParentChildrenTable.childUserId]
+                    }
+
+            if (childUserIds.isEmpty()) {
+                return@transaction emptyList()
+            }
+
+            UsersTable
                 .selectAll()
                 .where {
-                    ParentChildrenTable.parentUserId eq
-                            parentUserId
+                    UsersTable.id inList childUserIds
                 }
-                .orderBy(
-                    ParentChildrenTable.id to SortOrder.ASC
-                )
-                .map {
+                .associateBy {
+                    it[UsersTable.id]
+                }
+                .let { usersById ->
 
-                    ChildAccount(
-                        userId =
-                            it[UsersTable.id],
+                    childUserIds.mapNotNull { childUserId ->
 
-                        username =
-                            it[UsersTable.username],
+                        val user =
+                            usersById[childUserId]
+                                ?: return@mapNotNull null
 
-                        status =
-                            it[UsersTable.status]
-                    )
+                        ChildAccount(
+                            userId =
+                                user[UsersTable.id],
+                            username =
+                                user[UsersTable.username],
+                            status =
+                                user[UsersTable.status]
+                        )
+                    }
                 }
         }
     }
