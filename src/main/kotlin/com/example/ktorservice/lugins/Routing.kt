@@ -7,6 +7,7 @@ import com.example.ktorservice.routes.assignmentRoutes
 import com.example.ktorservice.routes.authRoutes
 import com.example.ktorservice.routes.deviceRoutes
 import com.example.ktorservice.routes.licenseRoutes
+import com.example.ktorservice.routes.parentRoutes
 import com.example.ktorservice.routes.viewedItemRoutes
 import com.example.ktorservice.service.AIService
 import com.example.ktorservice.service.AssignmentService
@@ -17,6 +18,7 @@ import io.ktor.server.routing.routing
 import com.example.ktorservice.service.AuthService
 import com.example.ktorservice.service.DeviceService
 import com.example.ktorservice.service.LicenseService
+import com.example.ktorservice.service.ParentChildService
 
 fun Application.configureRouting() {
 
@@ -41,7 +43,8 @@ fun Application.configureRouting() {
         AssignmentService(
             aiService
         )
-
+    val parentChildService =
+        ParentChildService()
     routing {
 
         get("/") {
@@ -74,6 +77,10 @@ fun Application.configureRouting() {
         assignmentRoutes(
             authService,
             assignmentService
+        )
+        parentRoutes(
+            authService = authService,
+            parentChildService = parentChildService
         )
     }
 }

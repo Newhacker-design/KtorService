@@ -6,6 +6,7 @@ import com.example.ktorservice.database.SessionsTable
 import com.example.ktorservice.database.UsersTable
 import com.example.ktorservice.database.table.AssignmentsTable
 import com.example.ktorservice.database.table.LocationTable
+import com.example.ktorservice.database.table.ParentChildrenTable
 import com.example.ktorservice.database.table.UserAssignmentsTable
 import com.example.ktorservice.database.table.ViewedItems
 import com.zaxxer.hikari.HikariConfig
@@ -97,7 +98,8 @@ object DatabaseFactory {
                 LicensesTable,
                 SessionsTable,
                 AssignmentsTable,
-                UserAssignmentsTable
+                UserAssignmentsTable,
+                ParentChildrenTable
             )
         }
 
