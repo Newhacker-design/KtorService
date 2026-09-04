@@ -260,84 +260,300 @@ class AIService {
 
         val key =
             if (sexEducation) {
+                sexEducationApiKey ?: apiKey
+            } else {
+                apiKey
+            } ?: throw IllegalStateException(
+                if (sexEducation) {
+                    "GEMINI_SEX_EDUCATION_API_KEY or GEMINI_API_KEY is not configured"
+                } else {
+                    "GEMINI_API_KEY is not configured"
+                }
+            )
 
-                sexEducationApiKey
-                    ?: apiKey
+        /*
+         * ------------------------------------------------------------
+         * MODEL CHÍNH
+         * ------------------------------------------------------------
+         */
+
+        val primaryModel =
+            if (sexEducation) {
+                sexEducationModel
+            } else {
+                model
+            }
+
+        /*
+         * ------------------------------------------------------------
+         * MODEL DỰ PHÒNG
+         *
+         * Có thể cấu hình bằng ENV:
+         *
+         * GEMINI_FALLBACK_MODEL
+         * GEMINI_SEX_EDUCATION_FALLBACK_MODEL
+         *
+         * Nếu không cấu hình:
+         *
+         * gemini-3.5-flash
+         *
+         * ------------------------------------------------------------
+         */
+
+        val fallbackModel =
+            if (sexEducation) {
+
+                System.getenv(
+                    "GEMINI_SEX_EDUCATION_FALLBACK_MODEL"
+                ) ?: System.getenv(
+                    "GEMINI_FALLBACK_MODEL"
+                ) ?: "gemini-3.5-flash"
 
             } else {
 
-                apiKey
+                System.getenv(
+                    "GEMINI_FALLBACK_MODEL"
+                ) ?: "gemini-3.5-flash"
             }
-                ?: throw IllegalStateException(
-                    if (sexEducation) {
-                        "GEMINI_SEX_EDUCATION_API_KEY or GEMINI_API_KEY is not configured"
-                    } else {
-                        "GEMINI_API_KEY is not configured"
-                    }
+
+        /*
+         * ------------------------------------------------------------
+         * DANH SÁCH MODEL
+         *
+         * Nếu primary == fallback thì chỉ gọi một model.
+         * ------------------------------------------------------------
+         */
+
+        val models =
+            if (
+                primaryModel == fallbackModel
+            ) {
+                listOf(primaryModel)
+            } else {
+                listOf(
+                    primaryModel,
+                    fallbackModel
                 )
+            }
 
         var lastError =
             "Unknown Gemini error"
 
-        // --------------------------------------------------------
-        // Tối đa 3 lần thử
-        // --------------------------------------------------------
+        /*
+         * ------------------------------------------------------------
+         * THỬ TỪNG MODEL
+         * ------------------------------------------------------------
+         */
 
-        for (attempt in 1..3) {
+        for ((modelIndex, selectedModel) in models.withIndex()) {
+
+            val modelType =
+                if (modelIndex == 0) {
+                    "PRIMARY"
+                } else {
+                    "FALLBACK"
+                }
 
             println(
-                "========== GEMINI ATTEMPT $attempt/3 =========="
+                "=================================================="
             )
 
-            try {
+            println(
+                "GEMINI MODEL TYPE = $modelType"
+            )
 
-                val result =
-                    withContext(Dispatchers.IO) {
+            println(
+                "GEMINI MODEL = $selectedModel"
+            )
 
-                        callGemini(
-                            key = key,
-                            prompt = prompt,
-                            sexEducation = sexEducation
-                        )
-                    }
+            println(
+                "=================================================="
+            )
 
-                println(
-                    "GEMINI SUCCESS ON ATTEMPT $attempt"
-                )
+            /*
+             * --------------------------------------------------------
+             * MỖI MODEL TỐI ĐA 3 ATTEMPT
+             * --------------------------------------------------------
+             */
 
-                return result
-
-            } catch (e: GeminiRetryException) {
-
-                lastError =
-                    e.message
-                        ?: "Gemini temporary error"
+            for (attempt in 1..3) {
 
                 println(
-                    "GEMINI TEMPORARY ERROR: $lastError"
+                    "========== GEMINI $modelType ATTEMPT $attempt/3 =========="
                 )
 
-                if (attempt < 3) {
+                try {
 
-                    val delayMs =
-                        when (attempt) {
-                            1 -> 2_000L
-                            2 -> 5_000L
-                            else -> 10_000L
+                    val result =
+                        withContext(Dispatchers.IO) {
+
+                            callGemini(
+                                key = key,
+                                prompt = prompt,
+                                sexEducation = sexEducation,
+                                selectedModelOverride = selectedModel
+                            )
                         }
 
                     println(
-                        "GEMINI RETRY AFTER ${delayMs}ms"
+                        "GEMINI SUCCESS"
                     )
 
-                    delay(
-                        delayMs
+                    println(
+                        "MODEL TYPE = $modelType"
                     )
+
+                    println(
+                        "MODEL = $selectedModel"
+                    )
+
+                    println(
+                        "ATTEMPT = $attempt"
+                    )
+
+                    return result
+
+                } catch (e: GeminiRetryException) {
+
+                    lastError =
+                        e.message
+                            ?: "Gemini temporary error"
+
+                    println(
+                        "GEMINI TEMPORARY ERROR: $lastError"
+                    )
+
+                    /*
+                     * ------------------------------------------------
+                     * Nếu chưa hết attempt:
+                     *
+                     * 1 -> 5s
+                     * 2 -> 15s
+                     *
+                     * Sau attempt 3 chuyển fallback model.
+                     * ------------------------------------------------
+                     */
+
+                    if (attempt < 3) {
+
+                        val delayMs =
+                            when (attempt) {
+                                1 -> 5_000L
+                                2 -> 15_000L
+                                else -> 30_000L
+                            }
+
+                        println(
+                            "GEMINI RETRY AFTER ${delayMs}ms"
+                        )
+
+                        delay(
+                            delayMs
+                        )
+                    }
+
+                } catch (e: java.net.SocketTimeoutException) {
+
+                    lastError =
+                        "Gemini socket timeout: ${e.message}"
+
+                    println(
+                        "GEMINI SOCKET TIMEOUT: ${e.message}"
+                    )
+
+                    if (attempt < 3) {
+
+                        val delayMs =
+                            when (attempt) {
+                                1 -> 5_000L
+                                2 -> 15_000L
+                                else -> 30_000L
+                            }
+
+                        println(
+                            "GEMINI TIMEOUT RETRY AFTER ${delayMs}ms"
+                        )
+
+                        delay(
+                            delayMs
+                        )
+                    }
+
+                } catch (e: java.net.ConnectException) {
+
+                    lastError =
+                        "Gemini connection error: ${e.message}"
+
+                    println(
+                        "GEMINI CONNECTION ERROR: ${e.message}"
+                    )
+
+                    if (attempt < 3) {
+
+                        val delayMs =
+                            when (attempt) {
+                                1 -> 5_000L
+                                2 -> 15_000L
+                                else -> 30_000L
+                            }
+
+                        println(
+                            "GEMINI CONNECTION RETRY AFTER ${delayMs}ms"
+                        )
+
+                        delay(
+                            delayMs
+                        )
+                    }
+
+                } catch (e: Exception) {
+
+                    /*
+                     * Lỗi không phải temporary:
+                     * Không retry.
+                     */
+
+                    throw e
                 }
+            }
 
-            } catch (e: Exception) {
+            /*
+             * --------------------------------------------------------
+             * MODEL HIỆN TẠI ĐÃ HẾT 3 ATTEMPT
+             * --------------------------------------------------------
+             */
 
-                throw e
+            if (modelIndex < models.lastIndex) {
+
+                println(
+                    "=================================================="
+                )
+
+                println(
+                    "GEMINI PRIMARY MODEL FAILED"
+                )
+
+                println(
+                    "PRIMARY MODEL = $selectedModel"
+                )
+
+                println(
+                    "SWITCHING TO FALLBACK MODEL = ${models[modelIndex + 1]}"
+                )
+
+                println(
+                    "=================================================="
+                )
+
+                /*
+                 * Không delay thêm ở đây.
+                 *
+                 * Đã chờ:
+                 * 5s + 15s
+                 *
+                 * trước khi chuyển model.
+                 */
+
             }
         }
 
@@ -346,6 +562,7 @@ class AIService {
         )
     }
 
+
     // ============================================================
     // CALL GEMINI
     // ============================================================
@@ -353,18 +570,17 @@ class AIService {
     private fun callGemini(
         key: String,
         prompt: String,
-        sexEducation: Boolean = false
+        sexEducation: Boolean = false,
+        selectedModelOverride: String? = null
     ): String {
 
         val selectedModel =
-            if (sexEducation) {
-
-                sexEducationModel
-
-            } else {
-
-                model
-            }
+            selectedModelOverride
+                ?: if (sexEducation) {
+                    sexEducationModel
+                } else {
+                    model
+                }
 
         val url =
             "https://generativelanguage.googleapis.com/v1beta/models/" +
@@ -389,11 +605,8 @@ class AIService {
                 "application/json"
             )
 
-            connection.connectTimeout =
-                15_000
-
-            connection.readTimeout =
-                60_000
+            connection.connectTimeout = 20_000
+            connection.readTimeout = 120_000
 
             connection.doOutput =
                 true
