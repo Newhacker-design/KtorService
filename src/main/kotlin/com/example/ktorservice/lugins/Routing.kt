@@ -76,7 +76,8 @@ fun Application.configureRouting() {
 
         assignmentRoutes(
             authService,
-            assignmentService
+            assignmentService,
+            parentChildService
         )
         parentRoutes(
             authService = authService,
