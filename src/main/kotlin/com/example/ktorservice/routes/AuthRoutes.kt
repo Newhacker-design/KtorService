@@ -1,5 +1,7 @@
 package com.example.ktorservice.routes
 
+import com.example.ktorservice.model.CreateChildSessionRequest
+import com.example.ktorservice.model.CreateChildSessionResponse
 import com.example.ktorservice.model.LoginRequest
 import com.example.ktorservice.model.LoginResponse
 import com.example.ktorservice.model.RegisterRequest
@@ -12,206 +14,171 @@ import io.ktor.server.routing.*
 import com.example.ktorservice.model.RegisterResponse
 import com.example.ktorservice.security.getBearerToken
 import com.example.ktorservice.security.requireUserId
+import com.example.ktorservice.service.ParentChildService
+
 fun Route.authRoutes(
-    authService: AuthService
+    authService: AuthService,
+    parentChildService: ParentChildService
 ) {
 
     post("/auth/login") {
 
-        try {
+        val request =
+            call.receive<LoginRequest>()
 
-            val request =
-                call.receive<LoginRequest>()
-
-            println(
-                "LOGIN REQUEST: username=${request.username}"
+        val result =
+            authService.login(
+                username = request.username,
+                password = request.password
             )
 
-            if (
-                request.username.isBlank() ||
-                request.password.isBlank()
-            ) {
-
-                call.respond(
-                    HttpStatusCode.BadRequest,
-                    LoginResponse(
-                        success = false,
-                        message =
-                            "Username and password are required"
-                    )
-                )
-
-                return@post
-            }
-
-            val result =
-                authService.login(
-                    username = request.username.trim(),
-                    password = request.password
-                )
-
-            if (!result.success) {
-
-                call.respond(
-                    HttpStatusCode.Unauthorized,
-                    LoginResponse(
-                        success = false,
-                        message = result.message
-                    )
-                )
-
-                return@post
-            }
+        if (!result.success) {
 
             call.respond(
-                HttpStatusCode.OK,
-                LoginResponse(
-                    success = true,
-                    token = result.token,
-                    userId = result.userId
-                )
-            )
-
-        } catch (e: Exception) {
-
-            e.printStackTrace()
-
-            println(
-                "LOGIN ERROR: ${e::class.qualifiedName}: ${e.message}"
-            )
-
-            call.respond(
-                HttpStatusCode.BadRequest,
+                HttpStatusCode.Unauthorized,
                 LoginResponse(
                     success = false,
-                    message =
-                        "Invalid request: ${e.message}"
+                    message = result.message
                 )
             )
+
+            return@post
         }
+
+        call.respond(
+            LoginResponse(
+                success = true,
+                token = result.token,
+                userId = result.userId
+            )
+        )
     }
+
+
     post("/auth/register") {
 
-        try {
+        val request =
+            call.receive<RegisterRequest>()
 
-            val request =
-                call.receive<RegisterRequest>()
-
-            val username =
-                request.username.trim()
-
-            val password =
-                request.password
-
-            println(
-                "REGISTER REQUEST: username=$username"
+        val result =
+            authService.register(
+                username = request.username,
+                password = request.password
             )
 
-            if (username.isBlank()) {
-
-                call.respond(
-                    HttpStatusCode.BadRequest,
-                    RegisterResponse(
-                        success = false,
-                        message = "Username is required"
-                    )
-                )
-
-                return@post
-            }
-
-            if (password.isBlank()) {
-
-                call.respond(
-                    HttpStatusCode.BadRequest,
-                    RegisterResponse(
-                        success = false,
-                        message = "Password is required"
-                    )
-                )
-
-                return@post
-            }
-
-            if (username.length < 3) {
-
-                call.respond(
-                    HttpStatusCode.BadRequest,
-                    RegisterResponse(
-                        success = false,
-                        message =
-                            "Username must be at least 3 characters"
-                    )
-                )
-
-                return@post
-            }
-
-            if (password.length < 6) {
-
-                call.respond(
-                    HttpStatusCode.BadRequest,
-                    RegisterResponse(
-                        success = false,
-                        message =
-                            "Password must be at least 6 characters"
-                    )
-                )
-
-                return@post
-            }
-
-            val result =
-                authService.register(
-                    username = username,
-                    password = password
-                )
-
-            if (!result.success) {
-
-                call.respond(
-                    HttpStatusCode.Conflict,
-                    RegisterResponse(
-                        success = false,
-                        message = result.message
-                    )
-                )
-
-                return@post
-            }
-
-            call.respond(
-                HttpStatusCode.Created,
-                RegisterResponse(
-                    success = true,
-                    userId = result.userId,
-                    username = result.username,
-                    message = "User created successfully"
-                )
-            )
-
-        }
-        catch (e: Exception) {
-
-            e.printStackTrace()
-
-            println("========== REGISTER ERROR ==========")
-            println("TYPE    = ${e::class.qualifiedName}")
-            println("MESSAGE = ${e.message}")
-            println("CAUSE   = ${e.cause?.javaClass?.name}")
-            println("CAUSE MESSAGE = ${e.cause?.message}")
-            println("===================================")
+        if (!result.success) {
 
             call.respond(
                 HttpStatusCode.BadRequest,
                 RegisterResponse(
                     success = false,
-                    message =
-                        "Invalid request: ${e.message}"
+                    message = result.message
                 )
             )
+
+            return@post
         }
+
+        call.respond(
+            RegisterResponse(
+                success = true,
+                userId = result.userId,
+                username = result.username
+            )
+        )
     }
+
+
+    /*
+     * ============================================================
+     * CREATE SESSION FOR CHILD
+     *
+     * Parent phải đăng nhập trước.
+     *
+     * POST /auth/child-session
+     *
+     * {
+     *     "childUserId": 6
+     * }
+     * ============================================================
+     */
+    post("/auth/child-session") {
+
+        val parentUserId =
+            call.requireUserId(
+                authService
+            )
+
+        if (parentUserId == null) {
+
+            call.respond(
+                HttpStatusCode.Unauthorized,
+                CreateChildSessionResponse(
+                    success = false,
+                    message = "Unauthorized"
+                )
+            )
+
+            return@post
+        }
+
+        val request =
+            call.receive<CreateChildSessionRequest>()
+
+        /*
+         * Không cho Parent tự ý tạo session cho
+         * một Child không thuộc quyền quản lý.
+         */
+        val isChild =
+            parentChildService.isChildOfParent(
+                parentUserId = parentUserId,
+                childUserId = request.childUserId
+            )
+
+        if (!isChild) {
+
+            call.respond(
+                HttpStatusCode.Forbidden,
+                CreateChildSessionResponse(
+                    success = false,
+                    message = "Child does not belong to this parent"
+                )
+            )
+
+            return@post
+        }
+
+        /*
+         * Tạo session với userId = childUserId.
+         */
+        val result =
+            authService.createSession(
+                userId = request.childUserId
+            )
+
+        if (!result.success) {
+
+            call.respond(
+                HttpStatusCode.BadRequest,
+                CreateChildSessionResponse(
+                    success = false,
+                    message = result.message
+                )
+            )
+
+            return@post
+        }
+
+        call.respond(
+            CreateChildSessionResponse(
+                success = true,
+                token = result.token,
+                userId = result.userId
+            )
+        )
+    }
+
+
     get("/auth/me") {
 
         val userId =
@@ -222,69 +189,44 @@ fun Route.authRoutes(
         if (userId == null) {
 
             call.respond(
-                HttpStatusCode.Unauthorized,
-                LoginResponse(
-                    success = false,
-                    message =
-                        "Invalid or expired token"
-                )
+                HttpStatusCode.Unauthorized
             )
 
             return@get
         }
 
         call.respond(
-            HttpStatusCode.OK,
-            LoginResponse(
-                success = true,
-                userId = userId
+            mapOf(
+                "success" to true,
+                "userId" to userId
             )
         )
     }
+
+
     post("/auth/logout") {
 
         val token =
-            call.getBearerToken()
+            call.request
+                .headers["Authorization"]
+                ?.removePrefix("Bearer ")
+                ?.trim()
 
-        if (token == null) {
+        if (token.isNullOrBlank()) {
 
             call.respond(
-                HttpStatusCode.Unauthorized,
-                LoginResponse(
-                    success = false,
-                    message =
-                        "Missing or invalid Authorization header"
-                )
+                HttpStatusCode.Unauthorized
             )
 
             return@post
         }
 
-        val userId =
-            authService.getUserId(token)
-
-        if (userId == null) {
-
-            call.respond(
-                HttpStatusCode.Unauthorized,
-                LoginResponse(
-                    success = false,
-                    message =
-                        "Invalid or expired token"
-                )
-            )
-
-            return@post
-        }
-
-        authService.logout(token)
+        val success =
+            authService.logout(token)
 
         call.respond(
-            HttpStatusCode.OK,
-            LoginResponse(
-                success = true,
-                userId = userId,
-                message = "Logged out successfully"
+            mapOf(
+                "success" to success
             )
         )
     }

@@ -132,3 +132,16 @@ data class AssignmentActionResponse(
     val score: Double? = null,
     val feedback: String? = null
 )
+
+@Serializable data class CreateChildSessionResponse(
+    val success: Boolean,
+    val token: String? = null,
+    val userId: Int? = null,
+    val message: String? = null )
+
+@Serializable
+data class CreateChildSessionRequest(
+    val childUserId: Int
+)
+
+

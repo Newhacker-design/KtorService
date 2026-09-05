@@ -33,6 +33,9 @@ import com.example.ktorservice.model.VideoDeleteResponse
 import com.example.ktorservice.model.VideoInfo
 import com.example.ktorservice.model.VideoUploadResponse
 import com.example.ktorservice.repository.LocationRepository
+import com.example.ktorservice.security.requireUserId
+import com.example.ktorservice.service.AuthService
+import com.example.ktorservice.service.ParentChildService
 import io.ktor.server.request.receiveText
 import kotlinx.serialization.json.Json
 import java.text.SimpleDateFormat
@@ -42,63 +45,179 @@ import java.util.TimeZone
 import io.ktor.utils.io.jvm.javaio.toInputStream
 import io.ktor.server.http.content.staticFiles
 import io.ktor.server.http.content.default
+import java.util.concurrent.ConcurrentHashMap
+
 private const val MAX_LOCATIONS = 50
 private const val MAX_VIDEOS = 2
+
 fun Route.viewedItemRoutes(
     repository: ViewedItemRepository,
-    locationRepository: LocationRepository
+    locationRepository: LocationRepository,
+    authService: AuthService,
+    parentChildService: ParentChildService
 ) {
     val callEvents = mutableListOf<CallEventRequest>()
-    var currentControl = ControlResponse(
-        command = "",
-        text = "",
-        videoUrl = null
-    )
+
+    val currentControls =
+        ConcurrentHashMap<Int, ControlResponse>()
+
 
     post("/control") {
 
         try {
 
-            val body = call.receiveText()
+            // ============================================================
+            // PARENT ID LẤY TỪ JWT
+            // ============================================================
 
-            println("========== POST /control ==========")
-            println("BODY = $body")
+            val parentUserId =
+                call.requireUserId(authService)
 
-            val request =
-                Json.decodeFromString<ControlRequest>(body)
+            if (parentUserId == null) {
 
-            if (
-                request.command != "ON" &&
-                request.command != "OFF"
-            ) {
                 call.respond(
-                    HttpStatusCode.BadRequest,
-                    "command must be ON or OFF"
+                    HttpStatusCode.Unauthorized,
+                    "Invalid or expired token"
                 )
 
                 return@post
             }
 
-            currentControl = ControlResponse(
-                command = request.command,
-                text = request.text,
-                videoUrl = request.videoUrl
+            // ============================================================
+            // READ BODY
+            // ============================================================
+
+            val body =
+                call.receiveText()
+
+            println(
+                "========== POST /control =========="
             )
 
-            println("command  = ${request.command}")
-            println("text     = ${request.text}")
-            println("videoUrl = ${request.videoUrl}")
+            println(
+                "PARENT USER ID = $parentUserId"
+            )
+
+            println(
+                "BODY = $body"
+            )
+
+            val request =
+                Json.decodeFromString<ControlRequest>(
+                    body
+                )
+
+            /*
+
+ * ============================================================
+ * VALIDATE COMMAND
+ * ============================================================
+ *
+ * Các command hợp lệ:
+ *
+ * ON
+ * OFF
+ * LOGOUT
+ *
+ * LOGOUT chỉ có ý nghĩa đối với Receiver.
+ * Parent vẫn phải sở hữu child tương ứng.
+   */
+
+            val command =
+                request.command
+                    .trim()
+                    .uppercase()
+
+            if (
+                command != "ON" &&
+                command != "OFF" &&
+                command != "LOGOUT"
+            ) {
+
+
+                call.respond(
+                    HttpStatusCode.BadRequest,
+                    "command must be ON, OFF or LOGOUT"
+                )
+
+                return@post
+
+
+            }
+
+            // ============================================================
+            // CHECK CHILD OWNERSHIP
+            // ============================================================
+
+            if (
+                !parentChildService.isChildOfParent(
+                    parentUserId = parentUserId,
+                    childUserId = request.childUserId
+                )
+            ) {
+
+                call.respond(
+                    HttpStatusCode.Forbidden,
+                    "Child does not belong to parent"
+                )
+
+                return@post
+            }
+
+            // ============================================================
+            // SAVE COMMAND
+            // ============================================================
+
+            val control =
+                ControlResponse(
+                    command = command,
+                    text = request.text,
+                    videoUrl = request.videoUrl
+                )
+
+
+            currentControls[
+                request.childUserId
+            ] = control
+
+            println(
+                "parentUserId = $parentUserId"
+            )
+
+            println(
+                "childUserId = ${request.childUserId}"
+            )
+
+            println(
+                "command = ${request.command}"
+            )
+
+            println(
+                "text = ${request.text}"
+            )
+
+            println(
+                "videoUrl = ${request.videoUrl}"
+            )
 
             call.respond(
                 HttpStatusCode.OK,
-                currentControl
+                control
             )
 
         } catch (e: Exception) {
 
-            println("========== CONTROL ERROR ==========")
-            println("Exception = ${e::class.qualifiedName}")
-            println("Message   = ${e.message}")
+            println(
+                "========== CONTROL ERROR =========="
+            )
+
+            println(
+                "Exception = ${e::class.qualifiedName}"
+            )
+
+            println(
+                "Message = ${e.message}"
+            )
 
             e.printStackTrace()
 
@@ -108,18 +227,93 @@ fun Route.viewedItemRoutes(
             )
         }
     }
+
+
+
     get("/control") {
 
-        println("========== GET /control ==========")
-        println("command  = ${currentControl.command}")
-        println("text     = ${currentControl.text}")
-        println("videoUrl = ${currentControl.videoUrl}")
-
-        call.respond(
-            HttpStatusCode.OK,
-            currentControl
+        println(
+            "========== GET /control =========="
         )
+
+        try {
+
+            // ============================================================
+            // CHILD ID LẤY TỪ JWT
+            // ============================================================
+
+            val childUserId =
+                call.requireUserId(authService)
+
+            if (childUserId == null) {
+
+                call.respond(
+                    HttpStatusCode.Unauthorized,
+                    "Invalid or expired token"
+                )
+
+                return@get
+            }
+
+            // ============================================================
+            // LẤY COMMAND RIÊNG CỦA CHILD
+            // ============================================================
+
+            val control =
+                currentControls[
+                    childUserId
+                ]
+                    ?: ControlResponse(
+                        command = "",
+                        text = "",
+                        videoUrl = null
+                    )
+
+            println(
+                "childUserId = $childUserId"
+            )
+
+            println(
+                "command = ${control.command}"
+            )
+
+            println(
+                "text = ${control.text}"
+            )
+
+            println(
+                "videoUrl = ${control.videoUrl}"
+            )
+
+            call.respond(
+                HttpStatusCode.OK,
+                control
+            )
+
+        } catch (e: Exception) {
+
+            println(
+                "========== GET CONTROL ERROR =========="
+            )
+
+            println(
+                "Exception = ${e::class.qualifiedName}"
+            )
+
+            println(
+                "Message = ${e.message}"
+            )
+
+            e.printStackTrace()
+
+            call.respond(
+                HttpStatusCode.InternalServerError,
+                "Control error: ${e.message}"
+            )
+        }
     }
+
+
 
     post("/videos/upload") {
 

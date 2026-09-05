@@ -24,6 +24,7 @@ class AuthService {
                         UsersTable.username eq username
                     }
                     .singleOrNull()
+
             println("========== LOGIN DEBUG ==========")
             println("USERNAME = [$username]")
             println("USER EXISTS = ${user != null}")
@@ -70,6 +71,85 @@ class AuthService {
                 return@transaction LoginResult(
                     success = false,
                     message = "Invalid username or password"
+                )
+            }
+
+            val token =
+                TokenGenerator.generate()
+
+            val now =
+                System.currentTimeMillis()
+
+            val expiresAt =
+                now +
+                        30L *
+                        24L *
+                        60L *
+                        60L *
+                        1000L
+
+            SessionsTable.insert {
+
+                it[SessionsTable.userId] =
+                    user[UsersTable.id]
+
+                it[SessionsTable.token] =
+                    token
+
+                it[SessionsTable.createdAt] =
+                    now
+
+                it[SessionsTable.expiresAt] =
+                    expiresAt
+            }
+
+            LoginResult(
+                success = true,
+                token = token,
+                userId =
+                    user[UsersTable.id]
+            )
+        }
+    }
+
+    /*
+     * ============================================================
+     * CREATE SESSION FOR EXISTING USER
+     *
+     * Dùng cho Child Receiver sau khi Parent đã xác nhận
+     * quyền quản lý Child.
+     * ============================================================
+     */
+    fun createSession(
+        userId: Int
+    ): LoginResult {
+
+        return transaction {
+
+            val user =
+                UsersTable
+                    .selectAll()
+                    .where {
+                        UsersTable.id eq userId
+                    }
+                    .singleOrNull()
+
+            if (user == null) {
+
+                return@transaction LoginResult(
+                    success = false,
+                    message = "User not found"
+                )
+            }
+
+            if (
+                user[UsersTable.status]
+                    .uppercase() != "ACTIVE"
+            ) {
+
+                return@transaction LoginResult(
+                    success = false,
+                    message = "Account disabled"
                 )
             }
 
@@ -192,6 +272,7 @@ class AuthService {
                 )
         }
     }
+
     fun logout(
         token: String
     ): Boolean {

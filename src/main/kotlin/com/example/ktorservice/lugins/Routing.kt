@@ -54,14 +54,18 @@ fun Application.configureRouting() {
             )
         }
 
+
         viewedItemRoutes(
-            viewedItemRepository,
-            locationRepository =
-                LocationRepository()
+            repository = viewedItemRepository,
+            locationRepository = LocationRepository(),
+            authService = authService,
+            parentChildService = parentChildService
         )
 
+
         authRoutes(
-            authService
+            authService,
+            parentChildService = parentChildService
         )
 
         deviceRoutes(

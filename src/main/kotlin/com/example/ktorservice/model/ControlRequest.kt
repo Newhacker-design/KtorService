@@ -6,5 +6,6 @@ import kotlinx.serialization.Serializable
 data class ControlRequest(
     val command: String,
     val text: String,
-    val videoUrl: String? = null
+    val videoUrl: String? = null,
+    val childUserId: Int
 )
