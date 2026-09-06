@@ -998,18 +998,49 @@ class AssignmentService(
 
         val questionMetadata: List<QuestionMetadata>
     )
-    private fun buildQuestions(
-        assignment: AssignmentResult
-    ): List<AssignmentQuestion> {
 
-        return assignment.questionMetadata.map { metadata ->
-            AssignmentQuestion(
-                id = metadata.id,
-                question = metadata.question,
-                points = metadata.points,
-                answerType = metadata.answerType,
-                gradingMethod = metadata.gradingMethod
-            )
+    // ============================================================
+// GET ALL USER ASSIGNMENTS
+//
+// Lấy toàn bộ bài đã được giao cho user này.
+//
+// QUAN TRỌNG:
+// - Chỉ lấy UserAssignmentsTable.userId == userId
+// - Không lấy bài của user khác
+// - Dùng lại rowToResult()
+// - Dùng lại rowToUserAssignment()
+// ============================================================
+    suspend fun getUserAssignments(
+        userId: Int
+    ): List<UserAssignmentResult> {
+        return withContext(Dispatchers.IO) {
+            transaction {
+                UserAssignmentsTable
+                    .selectAll()
+                    .where { UserAssignmentsTable.userId eq userId }
+                    .orderBy(UserAssignmentsTable.id to SortOrder.DESC)
+                    .mapNotNull { row ->
+                        val assignmentId = row[UserAssignmentsTable.assignmentId]
+                        val assignmentRow = AssignmentsTable
+                            .selectAll()
+                            .where { AssignmentsTable.id eq assignmentId }
+                            .firstOrNull()
+
+                        if (assignmentRow == null) {
+                            println("ASSIGNMENT NOT FOUND: assignmentId=$assignmentId")
+                            return@mapNotNull null
+                        }
+
+                        val assignment = rowToResult(assignmentRow)
+                        rowToUserAssignment(
+                            row = row,
+                            assignment = assignment
+                        )
+                    }
+            }
         }
     }
+
+
+
 }

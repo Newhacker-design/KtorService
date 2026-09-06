@@ -143,5 +143,8 @@ data class AssignmentActionResponse(
 data class CreateChildSessionRequest(
     val childUserId: Int
 )
+@Serializable data class AssignedAssignmentResponse( val success: Boolean,
+                                                     val assignments: List<UserAssignmentResponse> = emptyList(),
+                                                     val message: String? = null )
 
 

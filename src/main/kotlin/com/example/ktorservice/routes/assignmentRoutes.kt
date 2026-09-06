@@ -1,6 +1,7 @@
 package com.example.ktorservice.routes
 
 import com.example.ktorservice.database.table.AssignmentsTable.difficulty
+import com.example.ktorservice.model.AssignedAssignmentResponse
 import com.example.ktorservice.model.AssignmentActionResponse
 import com.example.ktorservice.model.AssignmentData
 import com.example.ktorservice.model.AssignmentDetailResponse
@@ -643,7 +644,60 @@ fun Route.assignmentRoutes(
         }
     }
 
-
+    get("/assignments/my") {
+        val userId = call.requireUserId(authService) ?: return@get call.respond( HttpStatusCode.Unauthorized,
+            AssignedAssignmentResponse( success = false, message = "Authentication required" ) )
+        try {
+            val results = assignmentService.getUserAssignments( userId = userId )
+            val assignments = results.map { result ->
+                UserAssignmentResponse(
+                    success = true,
+                    id = result.id,
+                    assignmentId = result.assignmentId,
+                    userId = result.userId,
+                    status = result.status,
+                    answer = result.answer,
+                    score = result.score,
+                    feedback = result.feedback,
+                    startedAt = result.startedAt,
+                    completedAt = result.completedAt,
+                    assignment = AssignmentStudentData(
+                        id = result.assignment.id,
+                        grade = result.assignment.grade,
+                        subject = result.assignment.subject,
+                        topic = result.assignment.topic,
+                        title = result.assignment.title,
+                        difficulty = result.assignment.difficulty,
+                        questions = result.questionMetadata.map { metadata ->
+                            AssignmentQuestion(
+                                id = metadata.id,
+                                question = metadata.question,
+                                points = metadata.points,
+                                answerType = metadata.answerType,
+                                gradingMethod = metadata.gradingMethod
+                            )
+                        },
+                        content = result.assignment.content,
+                        totalScore = result.assignment.totalScore
+                    )
+                )
+            }
+            call.respond(
+                AssignedAssignmentResponse(
+                    success = true,
+                    assignments = assignments
+                )
+            )
+        } catch (e: Exception) {
+            call.respond(
+                HttpStatusCode.InternalServerError,
+                AssignedAssignmentResponse(
+                    success = false,
+                    message = e.message ?: "Failed to load assignments"
+                )
+            )
+        }
+    }
     post("/assignments/{id}/start") {
 
         try {
