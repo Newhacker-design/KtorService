@@ -4,6 +4,7 @@ import com.example.ktorservice.model.CreateChildSessionRequest
 import com.example.ktorservice.model.CreateChildSessionResponse
 import com.example.ktorservice.model.LoginRequest
 import com.example.ktorservice.model.LoginResponse
+import com.example.ktorservice.model.MeResponse
 import com.example.ktorservice.model.RegisterRequest
 import com.example.ktorservice.service.AuthService
 import io.ktor.http.*
@@ -196,12 +197,13 @@ fun Route.authRoutes(
         }
 
         call.respond(
-            mapOf(
-                "success" to true,
-                "userId" to userId
+            MeResponse(
+                success = true,
+                userId = userId
             )
         )
     }
+
 
 
     post("/auth/logout") {

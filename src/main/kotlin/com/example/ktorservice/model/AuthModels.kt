@@ -61,3 +61,10 @@ data class CreateLicenseRequest(
     val type: String,
     val durationDays: Int
 )
+
+@Serializable
+data class MeResponse(
+    val success: Boolean,
+    val userId: Int? = null,
+    val message: String? = null
+)
