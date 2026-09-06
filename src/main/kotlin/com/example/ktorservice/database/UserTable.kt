@@ -21,6 +21,13 @@ object UsersTable : Table("users") {
             255
         )
 
+    val role =
+        varchar(
+            "role",
+            20
+        )
+            .default("PARENT")
+
     val status =
         varchar(
             "status",

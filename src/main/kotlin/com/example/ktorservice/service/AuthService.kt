@@ -30,8 +30,19 @@ class AuthService {
             println("USER EXISTS = ${user != null}")
 
             if (user != null) {
-                println("USER ID = ${user[UsersTable.id]}")
-                println("STATUS = [${user[UsersTable.status]}]")
+
+                println(
+                    "USER ID = ${user[UsersTable.id]}"
+                )
+
+                println(
+                    "ROLE = [${user[UsersTable.role]}]"
+                )
+
+                println(
+                    "STATUS = [${user[UsersTable.status]}]"
+                )
+
                 println(
                     "HASH LENGTH = ${
                         user[UsersTable.passwordHash].length
@@ -106,8 +117,8 @@ class AuthService {
             LoginResult(
                 success = true,
                 token = token,
-                userId =
-                    user[UsersTable.id]
+                userId = user[UsersTable.id],
+                role = user[UsersTable.role]
             )
         }
     }
@@ -185,8 +196,8 @@ class AuthService {
             LoginResult(
                 success = true,
                 token = token,
-                userId =
-                    user[UsersTable.id]
+                userId = user[UsersTable.id],
+                role = user[UsersTable.role]
             )
         }
     }
@@ -228,6 +239,15 @@ class AuthService {
 
                     it[UsersTable.passwordHash] =
                         passwordHash
+
+                    /*
+                     * Đăng ký thông thường luôn tạo PARENT.
+                     *
+                     * ADMIN không được tạo qua endpoint register.
+                     * CHILD được tạo thông qua ParentChildService.
+                     */
+                    it[UsersTable.role] =
+                        "PARENT"
 
                     it[UsersTable.status] =
                         "ACTIVE"
@@ -290,6 +310,7 @@ class AuthService {
         val success: Boolean,
         val token: String? = null,
         val userId: Int? = null,
+        val role: String? = null,
         val message: String? = null
     )
 

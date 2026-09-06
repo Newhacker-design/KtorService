@@ -7,14 +7,14 @@ object DevicesTable : IntIdTable("devices") {
 
     val userId =
         integer("user_id")
-            .index()
+            .uniqueIndex()
 
     val deviceId =
         varchar(
             "device_id",
             255
         )
-
+            .uniqueIndex()
     val deviceName =
         varchar(
             "device_name",

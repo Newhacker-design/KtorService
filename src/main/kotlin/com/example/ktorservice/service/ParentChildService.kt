@@ -11,6 +11,10 @@ class ParentChildService {
 
     companion object {
         private const val MAX_CHILDREN = 5
+
+        private const val ROLE_ADMIN = "ADMIN"
+        private const val ROLE_PARENT = "PARENT"
+        private const val ROLE_CHILD = "CHILD"
     }
 
     // ============================================================
@@ -45,6 +49,10 @@ class ParentChildService {
                 )
             }
 
+            // ====================================================
+            // CHECK PARENT STATUS
+            // ====================================================
+
             if (
                 parent[UsersTable.status]
                     .uppercase() != "ACTIVE"
@@ -57,25 +65,55 @@ class ParentChildService {
             }
 
             // ====================================================
-            // CHECK MAX 5 CHILDREN
+            // CHECK PARENT ROLE
             // ====================================================
 
-            val childCount =
-                ParentChildrenTable
-                    .selectAll()
-                    .where {
-                        ParentChildrenTable.parentUserId eq
-                                parentUserId
-                    }
-                    .count()
+            val parentRole =
+                parent[UsersTable.role]
+                    .uppercase()
 
-            if (childCount >= MAX_CHILDREN) {
+            /*
+             * Chỉ PARENT hoặc ADMIN được phép tạo Child.
+             */
+            if (
+                parentRole != ROLE_PARENT &&
+                parentRole != ROLE_ADMIN
+            ) {
 
                 return@transaction RegisterChildResult(
                     success = false,
-                    message =
-                        "Maximum $MAX_CHILDREN child accounts allowed"
+                    message = "Only parent or admin can create child accounts"
                 )
+            }
+
+            // ====================================================
+            // CHECK MAX CHILDREN
+            // ====================================================
+
+            /*
+             * ADMIN không bị giới hạn số Child.
+             *
+             * PARENT tối đa 5 Child.
+             */
+            if (parentRole != ROLE_ADMIN) {
+
+                val childCount =
+                    ParentChildrenTable
+                        .selectAll()
+                        .where {
+                            ParentChildrenTable.parentUserId eq
+                                    parentUserId
+                        }
+                        .count()
+
+                if (childCount >= MAX_CHILDREN) {
+
+                    return@transaction RegisterChildResult(
+                        success = false,
+                        message =
+                            "Maximum $MAX_CHILDREN child accounts allowed"
+                    )
+                }
             }
 
             // ====================================================
@@ -116,6 +154,13 @@ class ParentChildService {
 
                     it[UsersTable.passwordHash] =
                         passwordHash
+
+                    /*
+                     * BẮT BUỘC:
+                     * User được tạo ở đây là CHILD.
+                     */
+                    it[UsersTable.role] =
+                        ROLE_CHILD
 
                     it[UsersTable.status] =
                         "ACTIVE"
@@ -203,8 +248,10 @@ class ParentChildService {
                         ChildAccount(
                             userId =
                                 user[UsersTable.id],
+
                             username =
                                 user[UsersTable.username],
+
                             status =
                                 user[UsersTable.status]
                         )
