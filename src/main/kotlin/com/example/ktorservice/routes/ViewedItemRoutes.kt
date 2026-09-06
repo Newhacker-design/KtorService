@@ -1,6 +1,7 @@
 
 package com.example.ktorservice.routes
 
+import com.example.ktorservice.database.VideosTable
 import com.example.ktorservice.model.CallEventRequest
 import com.example.ktorservice.model.CallEventResponse
 import com.example.ktorservice.model.ControlRequest
@@ -45,10 +46,15 @@ import java.util.TimeZone
 import io.ktor.utils.io.jvm.javaio.toInputStream
 import io.ktor.server.http.content.staticFiles
 import io.ktor.server.http.content.default
+import org.jetbrains.exposed.sql.SortOrder
+import org.jetbrains.exposed.sql.and
+import org.jetbrains.exposed.sql.insert
+import org.jetbrains.exposed.sql.selectAll
+import org.jetbrains.exposed.sql.transactions.transaction
 import java.util.concurrent.ConcurrentHashMap
 
 private const val MAX_LOCATIONS = 50
-private const val MAX_VIDEOS = 2
+private const val MAX_VIDEOS = 10
 
 fun Route.viewedItemRoutes(
     repository: ViewedItemRepository,
@@ -313,90 +319,166 @@ fun Route.viewedItemRoutes(
         }
     }
 
-
-
     post("/videos/upload") {
 
         println("========== UPLOAD START ==========")
 
+        var savedFile: File? = null
+        var childUserId: Int? = null
+        var tempFile: File? = null
+
         try {
 
-            val multipart = call.receiveMultipart(
-                formFieldLimit = 500L * 1024 * 1024
+            // ============================================================
+            // PARENT ID LẤY TỪ TOKEN
+            // ============================================================
+
+            val parentUserId =
+                call.requireUserId(authService)
+
+            if (parentUserId == null) {
+
+                call.respond(
+                    HttpStatusCode.Unauthorized,
+                    "Invalid or expired token"
+                )
+
+                return@post
+            }
+
+            println(
+                "PARENT USER ID = $parentUserId"
             )
 
-            var savedFile: File? = null
+            // ============================================================
+            // READ MULTIPART
+            // ============================================================
+
+            val multipart =
+                call.receiveMultipart(
+                    formFieldLimit = 500L * 1024 * 1024
+                )
+
+            var originalFileName: String? = null
 
             multipart.forEachPart { part ->
 
                 try {
 
-                    if (part is PartData.FileItem) {
+                    when (part) {
 
-                        val fileName =
-                            part.originalFileName
-                                ?.substringAfterLast("/")
-                                ?.substringAfterLast("\\")
-                                ?: "video_${System.currentTimeMillis()}.mp4"
+                        // ====================================================
+                        // CHILD USER ID
+                        // ====================================================
 
-                        val videoDir = File("/app/videos")
-                        videoDir.mkdirs()
+                        is PartData.FormItem -> {
 
-                        val file = File(videoDir, fileName)
+                            if (part.name == "childUserId") {
 
-                        println("Uploading: ${file.absolutePath}")
+                                childUserId =
+                                    part.value
+                                        .trim()
+                                        .toIntOrNull()
 
-                        part.provider()
-                            .toInputStream()
-                            .use { input ->
+                                println(
+                                    "CHILD USER ID = $childUserId"
+                                )
+                            }
+                        }
 
-                                file.outputStream()
-                                    .use { output ->
+                        // ====================================================
+                        // VIDEO FILE
+                        // ====================================================
 
-                                        val buffer =
-                                            ByteArray(64 * 1024)
+                        is PartData.FileItem -> {
 
-                                        var total = 0L
+                            originalFileName =
+                                part.originalFileName
+                                    ?.substringAfterLast("/")
+                                    ?.substringAfterLast("\\")
+                                    ?: "video_${System.currentTimeMillis()}.mp4"
 
-                                        while (true) {
+                            val tempDir =
+                                File("/app/videos/temp")
 
-                                            val count =
-                                                input.read(buffer)
+                            tempDir.mkdirs()
 
-                                            if (count <= 0) {
-                                                break
-                                            }
+                            val tempName =
+                                "upload_${System.currentTimeMillis()}_${System.nanoTime()}.tmp"
 
-                                            output.write(
-                                                buffer,
-                                                0,
-                                                count
-                                            )
+                            val temp =
+                                File(
+                                    tempDir,
+                                    tempName
+                                )
 
-                                            total += count
+                            println(
+                                "Receiving temporary file: ${temp.absolutePath}"
+                            )
 
-                                            if (
-                                                total % (10L * 1024 * 1024)
-                                                < count
-                                            ) {
-                                                println(
-                                                    "Received ${total / 1024 / 1024} MB"
+                            part.provider()
+                                .toInputStream()
+                                .use { input ->
+
+                                    temp.outputStream()
+                                        .use { output ->
+
+                                            val buffer =
+                                                ByteArray(64 * 1024)
+
+                                            var total =
+                                                0L
+
+                                            while (true) {
+
+                                                val count =
+                                                    input.read(buffer)
+
+                                                if (count <= 0) {
+                                                    break
+                                                }
+
+                                                output.write(
+                                                    buffer,
+                                                    0,
+                                                    count
                                                 )
+
+                                                total += count
+
+                                                if (
+                                                    total %
+                                                    (10L * 1024 * 1024)
+                                                    < count
+                                                ) {
+
+                                                    println(
+                                                        "Received ${total / 1024 / 1024} MB"
+                                                    )
+                                                }
                                             }
                                         }
-                                    }
-                            }
+                                }
 
-                        savedFile = file
+                            tempFile =
+                                temp
 
-                        println(
-                            "VIDEO UPLOADED: ${file.name}, size=${file.length()}"
-                        )
+                            println(
+                                "Temporary upload complete: " +
+                                        "${temp.absolutePath}, " +
+                                        "size=${temp.length()}"
+                            )
+                        }
+
+                        else -> {}
                     }
 
                 } catch (e: Exception) {
 
-                    println("========== PART ERROR ==========")
+                    println(
+                        "========== PART ERROR =========="
+                    )
+
                     e.printStackTrace()
 
                     throw e
@@ -407,32 +489,237 @@ fun Route.viewedItemRoutes(
                 }
             }
 
-            val file = savedFile
-                ?: throw IllegalStateException("No video file")
+            // ============================================================
+            // VALIDATE CHILD USER ID
+            // ============================================================
+
+            val targetChildUserId =
+                childUserId
+                    ?: run {
+
+                        call.respond(
+                            HttpStatusCode.BadRequest,
+                            "childUserId is required"
+                        )
+
+                        return@post
+                    }
+
+            // ============================================================
+            // CHECK PARENT -> CHILD RELATION
+            // ============================================================
+
+            val isChild =
+                parentChildService.isChildOfParent(
+                    parentUserId = parentUserId,
+                    childUserId = targetChildUserId
+                )
+
+            if (!isChild) {
+
+                println(
+                    "UPLOAD DENIED: parentUserId=$parentUserId " +
+                            "does not own childUserId=$targetChildUserId"
+                )
+
+                call.respond(
+                    HttpStatusCode.Forbidden,
+                    "Child does not belong to parent"
+                )
+
+                return@post
+            }
+
+            println(
+                "PARENT -> CHILD RELATION OK: " +
+                        "$parentUserId -> $targetChildUserId"
+            )
+
+            // ============================================================
+            // VALIDATE FILE
+            // ============================================================
+
+            val temp =
+                tempFile
+                    ?: run {
+
+                        call.respond(
+                            HttpStatusCode.BadRequest,
+                            "No video file uploaded"
+                        )
+
+                        return@post
+                    }
+
+            val fileName =
+                originalFileName
+                    ?: "video_${System.currentTimeMillis()}.mp4"
+
+            // ============================================================
+            // FINAL VIDEO DIRECTORY
+            // ============================================================
+
+            val videoDir =
+                File("/app/videos")
+
+            videoDir.mkdirs()
+
+            val file =
+                File(
+                    videoDir,
+                    fileName
+                )
+
+            // ============================================================
+            // CHECK DUPLICATE FILE NAME
+            // ============================================================
+
+            val alreadyExists =
+                transaction {
+
+                    VideosTable
+                        .selectAll()
+                        .where {
+                            VideosTable.fileName eq fileName
+                        }
+                        .any()
+                }
+
+            if (alreadyExists || file.exists()) {
+
+                println(
+                    "VIDEO ALREADY EXISTS: $fileName"
+                )
+
+                call.respond(
+                    HttpStatusCode.Conflict,
+                    "Video file already exists: $fileName"
+                )
+
+                return@post
+            }
+
+            // ============================================================
+            // MOVE TEMP FILE TO FINAL LOCATION
+            // ============================================================
+
+            if (!temp.renameTo(file)) {
+
+                throw IllegalStateException(
+                    "Cannot move temporary video to final location"
+                )
+            }
+
+            savedFile =
+                file
+
+            println(
+                "VIDEO SAVED: ${file.absolutePath}"
+            )
+
+            println(
+                "VIDEO SIZE: ${file.length()} bytes"
+            )
+
+            // ============================================================
+            // SAVE VIDEO METADATA
+            // ============================================================
+
+            val createdAt =
+                System.currentTimeMillis()
+
+            transaction {
+
+                VideosTable.insert {
+
+                    it[VideosTable.childUserId] =
+                        targetChildUserId
+
+                    it[VideosTable.fileName] =
+                        file.name
+
+                    it[VideosTable.fileSize] =
+                        file.length()
+
+                    it[VideosTable.createdAt] =
+                        createdAt
+                }
+            }
+
+            println(
+                "VIDEO DATABASE RECORD CREATED"
+            )
+
+            println(
+                "childUserId = $targetChildUserId"
+            )
+
+            println(
+                "fileName = ${file.name}"
+            )
+
+            // ============================================================
+            // CLEANUP OLD VIDEOS OF THIS CHILD ONLY
+            // ============================================================
+
+            cleanupOldVideos(
+            )
+
+            // ============================================================
+            // RESPONSE
+            // ============================================================
 
             println(
                 "========== UPLOAD COMPLETE =========="
             )
-            cleanupOldVideos()
+
             call.respond(
                 HttpStatusCode.OK,
                 VideoUploadResponse(
                     success = true,
                     fileName = file.name,
                     size = file.length(),
-                    videoUrl = "https://ktorservice.onrender.com/videos/${file.name}"
+                    videoUrl =
+                        "https://ktorservice.onrender.com/videos/${file.name}"
                 )
             )
 
         } catch (e: Exception) {
 
-            println("========== UPLOAD ERROR ==========")
-            println("Exception: ${e::class.qualifiedName}")
-            println("Message: ${e.message}")
+            println(
+                "========== UPLOAD ERROR =========="
+            )
+
+            println(
+                "Exception: ${e::class.qualifiedName}"
+            )
+
+            println(
+                "Message: ${e.message}"
+            )
 
             e.printStackTrace()
 
+            // ============================================================
+            // CLEANUP FAILED UPLOAD
+            // ============================================================
+
+            try {
+
+                tempFile?.delete()
+
+            } catch (_: Exception) {
+            }
+
+            try {
+
+                savedFile?.delete()
+
+            } catch (_: Exception) {
+            }
+
             if (!call.response.isCommitted) {
+
                 call.respond(
                     HttpStatusCode.InternalServerError,
                     "Upload error: ${e.message}"
@@ -440,77 +727,362 @@ fun Route.viewedItemRoutes(
             }
         }
     }
-    staticFiles(
-        remotePath = "/videos",
-        dir = File("/app/videos")
-    )
 
     get("/videos") {
 
-        val videoDir = File("/app/videos")
-
-        if (!videoDir.exists() || !videoDir.isDirectory) {
-            return@get call.respond(
-                HttpStatusCode.OK,
-                emptyList<VideoInfo>()
-            )
-        }
-
-        val videos = videoDir
-            .listFiles()
-            ?.filter { it.isFile }
-            ?.filter {
-                it.extension.lowercase() in setOf(
-                    "mp4",
-                    "mov",
-                    "mkv",
-                    "webm",
-                    "avi"
-                )
-            }
-            ?.sortedByDescending { it.lastModified() }
-            ?.map { file ->
-                VideoInfo(
-                    name = file.name,
-                    size = file.length(),
-                    url = "https://ktorservice.onrender.com/videos/${file.name}"
-                )
-            }
-            ?: emptyList()
-
-        call.respond(
-            HttpStatusCode.OK,
-            videos
+        println(
+            "========== GET /videos =========="
         )
+
+        try {
+
+            // ============================================================
+            // CHILD ID LẤY TỪ TOKEN
+            // ============================================================
+
+            val childUserId =
+                call.requireUserId(authService)
+
+            if (childUserId == null) {
+
+                call.respond(
+                    HttpStatusCode.Unauthorized,
+                    "Invalid or expired token"
+                )
+
+                return@get
+            }
+
+            println(
+                "childUserId = $childUserId"
+            )
+
+
+            // ============================================================
+            // LẤY VIDEO CỦA CHILD
+            // ============================================================
+
+            val videos =
+                transaction {
+
+                    VideosTable
+                        .selectAll()
+                        .where {
+                            VideosTable.childUserId eq childUserId
+                        }
+                        .orderBy(
+                            VideosTable.createdAt to
+                                    SortOrder.DESC
+                        )
+                        .map { row ->
+
+                            val fileName =
+                                row[VideosTable.fileName]
+
+                            val file =
+                                File(
+                                    "/app/videos",
+                                    fileName
+                                )
+
+                            VideoInfo(
+                                name = fileName,
+
+                                size =
+                                    if (file.exists()) {
+                                        file.length()
+                                    } else {
+                                        row[VideosTable.fileSize]
+                                    },
+
+                                url =
+                                    "https://ktorservice.onrender.com/videos/$fileName"
+                            )
+                        }
+                }
+
+
+            println(
+                "Videos for child $childUserId = ${videos.size}"
+            )
+
+            videos.forEach { video ->
+
+                println(
+                    "VIDEO -> ${video.name}"
+                )
+            }
+
+
+            call.respond(
+                HttpStatusCode.OK,
+                videos
+            )
+
+        } catch (e: Exception) {
+
+            println(
+                "========== GET VIDEOS ERROR =========="
+            )
+
+            println(
+                "Exception = ${e::class.qualifiedName}"
+            )
+
+            println(
+                "Message = ${e.message}"
+            )
+
+            e.printStackTrace()
+
+            if (!call.response.isCommitted) {
+
+                call.respond(
+                    HttpStatusCode.InternalServerError,
+                    "Get videos error: ${e.message}"
+                )
+            }
+        }
     }
+
     get("/videos/{fileName}") {
 
-        val fileName = call.parameters["fileName"]
-            ?: return@get call.respond(
-                HttpStatusCode.BadRequest,
-                "Missing file name"
+        println(
+            "========== GET /videos/{fileName} =========="
+        )
+
+        try {
+
+            // ============================================================
+            // CHILD ID LẤY TỪ TOKEN
+            // ============================================================
+
+            val childUserId =
+                call.requireUserId(authService)
+
+            if (childUserId == null) {
+
+                call.respond(
+                    HttpStatusCode.Unauthorized,
+                    "Invalid or expired token"
+                )
+
+                return@get
+            }
+
+
+            // ============================================================
+            // FILE NAME
+            // ============================================================
+
+            val fileName =
+                call.parameters["fileName"]
+
+            if (fileName.isNullOrBlank()) {
+
+                call.respond(
+                    HttpStatusCode.BadRequest,
+                    "Missing file name"
+                )
+
+                return@get
+            }
+
+
+            // ============================================================
+            // CHỐNG PATH TRAVERSAL
+            // ============================================================
+
+            val safeFileName =
+                File(fileName).name
+
+            if (safeFileName != fileName) {
+
+                call.respond(
+                    HttpStatusCode.Forbidden,
+                    "Invalid file name"
+                )
+
+                return@get
+            }
+
+
+            println(
+                "childUserId = $childUserId"
             )
 
-        // Chống path traversal
-        val safeFileName = File(fileName).name
-
-        val file = File("/app/videos", safeFileName)
-
-        println("========== VIDEO REQUEST ==========")
-        println("Requested: $safeFileName")
-        println("Path: ${file.absolutePath}")
-        println("Exists: ${file.exists()}")
-        println("Size: ${if (file.exists()) file.length() else 0}")
-
-        if (!file.exists() || !file.isFile) {
-            return@get call.respond(
-                HttpStatusCode.NotFound,
-                "Video not found"
+            println(
+                "Requested video = $safeFileName"
             )
+
+
+            // ============================================================
+            // KIỂM TRA VIDEO THUỘC CHILD
+            // ============================================================
+
+            val videoExists =
+                transaction {
+
+                    VideosTable
+                        .selectAll()
+                        .where {
+
+                            (VideosTable.childUserId eq childUserId) and
+                                    (VideosTable.fileName eq safeFileName)
+
+                        }
+                        .any()
+                }
+
+
+            if (!videoExists) {
+
+                println(
+                    "DOWNLOAD DENIED"
+                )
+
+                println(
+                    "childUserId = $childUserId"
+                )
+
+                println(
+                    "fileName = $safeFileName"
+                )
+
+                call.respond(
+                    HttpStatusCode.NotFound,
+                    "Video not found"
+                )
+
+                return@get
+            }
+
+
+            // ============================================================
+            // FILE
+            // ============================================================
+
+            val videoDir =
+                File("/app/videos")
+
+            val file =
+                File(
+                    videoDir,
+                    safeFileName
+                )
+
+
+            println(
+                "Path = ${file.absolutePath}"
+            )
+
+            println(
+                "Exists = ${file.exists()}"
+            )
+
+            println(
+                "Size = ${
+                    if (file.exists()) {
+                        file.length()
+                    } else {
+                        0
+                    }
+                }"
+            )
+
+
+            // ============================================================
+            // KIỂM TRA FILE THỰC TẾ
+            // ============================================================
+
+            if (!file.exists() || !file.isFile) {
+
+                println(
+                    "VIDEO FILE NOT FOUND"
+                )
+
+                call.respond(
+                    HttpStatusCode.NotFound,
+                    "Video file not found"
+                )
+
+                return@get
+            }
+
+
+            // ============================================================
+            // CANONICAL PATH CHECK
+            // ============================================================
+
+            val videoDirPath =
+                videoDir
+                    .canonicalFile
+                    .toPath()
+
+            val filePath =
+                file
+                    .canonicalFile
+                    .toPath()
+
+            if (!filePath.startsWith(videoDirPath)) {
+
+                println(
+                    "PATH TRAVERSAL BLOCKED"
+                )
+
+                call.respond(
+                    HttpStatusCode.Forbidden,
+                    "Access denied"
+                )
+
+                return@get
+            }
+
+
+            // ============================================================
+            // DOWNLOAD
+            // ============================================================
+
+            println(
+                "VIDEO DOWNLOAD ALLOWED"
+            )
+
+            println(
+                "childUserId = $childUserId"
+            )
+
+            println(
+                "fileName = $safeFileName"
+            )
+
+            call.respondFile(file)
+
+        } catch (e: Exception) {
+
+            println(
+                "========== VIDEO DOWNLOAD ERROR =========="
+            )
+
+            println(
+                "Exception = ${e::class.qualifiedName}"
+            )
+
+            println(
+                "Message = ${e.message}"
+            )
+
+            e.printStackTrace()
+
+            if (!call.response.isCommitted) {
+
+                call.respond(
+                    HttpStatusCode.InternalServerError,
+                    "Video download error: ${e.message}"
+                )
+            }
         }
-
-        call.respondFile(file)
     }
+
     delete("/videos/{fileName}") {
 
         val fileName =

@@ -1,5 +1,6 @@
-package com.example.ktorservice.config
 
+package com.example.ktorservice.config
+import com.example.ktorservice.database.VideosTable
 import com.example.ktorservice.database.DevicesTable
 import com.example.ktorservice.database.LicensesTable
 import com.example.ktorservice.database.SessionsTable
@@ -99,7 +100,8 @@ object DatabaseFactory {
                 SessionsTable,
                 AssignmentsTable,
                 UserAssignmentsTable,
-                ParentChildrenTable
+                ParentChildrenTable,
+                VideosTable
             )
         }
 
