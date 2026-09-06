@@ -10,11 +10,11 @@ import org.jetbrains.exposed.sql.transactions.transaction
 class ParentChildService {
 
     companion object {
-        private const val MAX_CHILDREN = 5
+         const val MAX_CHILDREN = 5
 
-        private const val ROLE_ADMIN = "ADMIN"
-        private const val ROLE_PARENT = "PARENT"
-        private const val ROLE_CHILD = "CHILD"
+         const val ROLE_ADMIN = "ADMIN"
+         const val ROLE_PARENT = "PARENT"
+         const val ROLE_CHILD = "CHILD"
     }
 
     // ============================================================

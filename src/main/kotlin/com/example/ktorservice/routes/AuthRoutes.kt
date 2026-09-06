@@ -6,21 +6,24 @@ import com.example.ktorservice.model.LoginRequest
 import com.example.ktorservice.model.LoginResponse
 import com.example.ktorservice.model.MeResponse
 import com.example.ktorservice.model.RegisterRequest
+import com.example.ktorservice.model.RegisterResponse
+import com.example.ktorservice.security.requireUserId
 import com.example.ktorservice.service.AuthService
+import com.example.ktorservice.service.ParentChildService
 import io.ktor.http.*
 import io.ktor.server.application.*
 import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
-import com.example.ktorservice.model.RegisterResponse
-import com.example.ktorservice.security.getBearerToken
-import com.example.ktorservice.security.requireUserId
-import com.example.ktorservice.service.ParentChildService
 
 fun Route.authRoutes(
     authService: AuthService,
     parentChildService: ParentChildService
 ) {
+
+    // ============================================================
+    // POST /auth/login
+    // ============================================================
 
     post("/auth/login") {
 
@@ -29,8 +32,8 @@ fun Route.authRoutes(
 
         val result =
             authService.login(
-                username = request.username,
-                password = request.password
+                request.username,
+                request.password
             )
 
         if (!result.success) {
@@ -50,11 +53,18 @@ fun Route.authRoutes(
             LoginResponse(
                 success = true,
                 token = result.token,
-                userId = result.userId
+                userId = result.userId,
+                role = result.role
             )
         )
     }
 
+
+    // ============================================================
+    // POST /auth/register
+    //
+    // Đăng ký thông thường luôn tạo PARENT
+    // ============================================================
 
     post("/auth/register") {
 
@@ -63,8 +73,8 @@ fun Route.authRoutes(
 
         val result =
             authService.register(
-                username = request.username,
-                password = request.password
+                request.username,
+                request.password
             )
 
         if (!result.success) {
@@ -90,27 +100,18 @@ fun Route.authRoutes(
     }
 
 
-    /*
-     * ============================================================
-     * CREATE SESSION FOR CHILD
-     *
-     * Parent phải đăng nhập trước.
-     *
-     * POST /auth/child-session
-     *
-     * {
-     *     "childUserId": 6
-     * }
-     * ============================================================
-     */
+    // ============================================================
+    // POST /auth/child-session
+    //
+    // Parent/Admin tạo session token cho Child
+    // ============================================================
+
     post("/auth/child-session") {
 
-        val parentUserId =
-            call.requireUserId(
-                authService
-            )
+        val callerUserId =
+            call.requireUserId(authService)
 
-        if (parentUserId == null) {
+        if (callerUserId == null) {
 
             call.respond(
                 HttpStatusCode.Unauthorized,
@@ -123,38 +124,77 @@ fun Route.authRoutes(
             return@post
         }
 
-        val request =
-            call.receive<CreateChildSessionRequest>()
 
-        /*
-         * Không cho Parent tự ý tạo session cho
-         * một Child không thuộc quyền quản lý.
-         */
-        val isChild =
-            parentChildService.isChildOfParent(
-                parentUserId = parentUserId,
-                childUserId = request.childUserId
-            )
+        // --------------------------------------------------------
+        // Kiểm tra role của người gọi
+        // --------------------------------------------------------
 
-        if (!isChild) {
+        val callerRole =
+            authService
+                .getUserRole(callerUserId)
+                ?.uppercase()
+
+        if (
+            callerRole != "PARENT" &&
+            callerRole != "ADMIN"
+        ) {
 
             call.respond(
                 HttpStatusCode.Forbidden,
                 CreateChildSessionResponse(
                     success = false,
-                    message = "Child does not belong to this parent"
+                    message = "Only Parent or Admin can create child session"
                 )
             )
 
             return@post
         }
 
-        /*
-         * Tạo session với userId = childUserId.
-         */
+
+        val request =
+            call.receive<CreateChildSessionRequest>()
+
+
+        // --------------------------------------------------------
+        // Kiểm tra Child thuộc Parent
+        //
+        // ADMIN:
+        //     được quản lý Child mà không cần quan hệ parent_children
+        //
+        // PARENT:
+        //     bắt buộc Child phải thuộc Parent đó
+        // --------------------------------------------------------
+
+        if (callerRole != "ADMIN") {
+
+            val isChild =
+                parentChildService.isChildOfParent(
+                    parentUserId = callerUserId,
+                    childUserId = request.childUserId
+                )
+
+            if (!isChild) {
+
+                call.respond(
+                    HttpStatusCode.Forbidden,
+                    CreateChildSessionResponse(
+                        success = false,
+                        message = "Child does not belong to this parent"
+                    )
+                )
+
+                return@post
+            }
+        }
+
+
+        // --------------------------------------------------------
+        // Tạo session cho Child
+        // --------------------------------------------------------
+
         val result =
             authService.createSession(
-                userId = request.childUserId
+                request.childUserId
             )
 
         if (!result.success) {
@@ -170,22 +210,26 @@ fun Route.authRoutes(
             return@post
         }
 
+
         call.respond(
             CreateChildSessionResponse(
                 success = true,
                 token = result.token,
-                userId = result.userId
+                userId = result.userId,
+                role = result.role
             )
         )
     }
 
 
+    // ============================================================
+    // GET /auth/me
+    // ============================================================
+
     get("/auth/me") {
 
         val userId =
-            call.requireUserId(
-                authService
-            )
+            call.requireUserId(authService)
 
         if (userId == null) {
 
@@ -196,15 +240,24 @@ fun Route.authRoutes(
             return@get
         }
 
+
+        val role =
+            authService.getUserRole(userId)
+
+
         call.respond(
             MeResponse(
                 success = true,
-                userId = userId
+                userId = userId,
+                role = role
             )
         )
     }
 
 
+    // ============================================================
+    // POST /auth/logout
+    // ============================================================
 
     post("/auth/logout") {
 
@@ -223,8 +276,10 @@ fun Route.authRoutes(
             return@post
         }
 
+
         val success =
             authService.logout(token)
+
 
         call.respond(
             mapOf(

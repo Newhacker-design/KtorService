@@ -133,16 +133,15 @@ data class AssignmentActionResponse(
     val feedback: String? = null
 )
 
-@Serializable data class CreateChildSessionResponse(
+@Serializable
+data class CreateChildSessionResponse(
     val success: Boolean,
     val token: String? = null,
     val userId: Int? = null,
-    val message: String? = null )
-
-@Serializable
-data class CreateChildSessionRequest(
-    val childUserId: Int
+    val role: String? = null,
+    val message: String? = null
 )
+
 @Serializable data class AssignedAssignmentResponse( val success: Boolean,
                                                      val assignments: List<UserAssignmentResponse> = emptyList(),
                                                      val message: String? = null )

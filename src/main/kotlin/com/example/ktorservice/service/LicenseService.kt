@@ -1,29 +1,73 @@
 package com.example.ktorservice.service
 
 import com.example.ktorservice.database.LicensesTable
+import com.example.ktorservice.database.UsersTable
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.transactions.transaction
 
 class LicenseService {
+
+    companion object {
+        const val ROLE_ADMIN = "ADMIN"
+        const val ROLE_PARENT = "PARENT"
+        const val ROLE_CHILD = "CHILD"
+    }
 
     fun getLicense(
         userId: Int,
         deviceId: Int
     ): LicenseResult {
 
-        val now =
-            System.currentTimeMillis()
-
         return transaction {
+
+            // ============================================================
+            // ADMIN
+            // ============================================================
+            //
+            // ADMIN không cần license.
+            // Không cần kiểm tra device/license trong database.
+            //
+            val user =
+                UsersTable
+                    .selectAll()
+                    .where {
+                        UsersTable.id eq userId
+                    }
+                    .singleOrNull()
+
+            if (user == null) {
+
+                return@transaction LicenseResult(
+                    active = false,
+                    message = "User not found"
+                )
+            }
+
+            val role =
+                user[UsersTable.role]
+                    .uppercase()
+
+            if (role == ROLE_ADMIN) {
+
+                return@transaction LicenseResult(
+                    active = true,
+                    type = "ADMIN"
+                )
+            }
+
+            // ============================================================
+            // PARENT / CHILD
+            // ============================================================
+
+            val now =
+                System.currentTimeMillis()
 
             val row =
                 LicensesTable
                     .selectAll()
                     .where {
                         (LicensesTable.userId eq userId) and
-                                (
-                                        LicensesTable.deviceId eq deviceId
-                                        )
+                                (LicensesTable.deviceId eq deviceId)
                     }
                     .singleOrNull()
 
@@ -66,6 +110,8 @@ class LicenseService {
             )
         }
     }
+
+
     fun createLicense(
         userId: Int,
         deviceId: Int,
@@ -74,6 +120,37 @@ class LicenseService {
     ): LicenseResult {
 
         return transaction {
+
+            // Kiểm tra user tồn tại
+            val user =
+                UsersTable
+                    .selectAll()
+                    .where {
+                        UsersTable.id eq userId
+                    }
+                    .singleOrNull()
+
+            if (user == null) {
+
+                return@transaction LicenseResult(
+                    active = false,
+                    message = "User not found"
+                )
+            }
+
+            // ADMIN không cần license.
+            // Không nên tạo license cho ADMIN.
+            if (
+                user[UsersTable.role]
+                    .uppercase() == ROLE_ADMIN
+            ) {
+
+                return@transaction LicenseResult(
+                    active = true,
+                    type = "ADMIN",
+                    message = "ADMIN does not require a license"
+                )
+            }
 
             val now =
                 System.currentTimeMillis()
@@ -122,6 +199,7 @@ class LicenseService {
         }
     }
 }
+
 
 data class LicenseResult(
     val active: Boolean,

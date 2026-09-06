@@ -1,14 +1,24 @@
-
 package com.example.ktorservice.service
 
 import com.example.ktorservice.database.DevicesTable
+import com.example.ktorservice.database.UsersTable
 import org.jetbrains.exposed.sql.and
+import org.jetbrains.exposed.sql.insertAndGetId
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.transactions.transaction
 import org.jetbrains.exposed.sql.update
-import org.jetbrains.exposed.sql.insertAndGetId
 
 class DeviceService {
+
+    companion object {
+
+        private const val ROLE_ADMIN = "ADMIN"
+        private const val ROLE_PARENT = "PARENT"
+        private const val ROLE_CHILD = "CHILD"
+
+        private const val MAX_DEVICES_PER_USER = 1
+    }
+
 
     /*
      * ============================================================
@@ -25,11 +35,54 @@ class DeviceService {
 
         return transaction {
 
-            val now = System.currentTimeMillis()
+            val now =
+                System.currentTimeMillis()
 
-            /*
-             * Tìm device đã tồn tại
-             */
+
+            // ====================================================
+            // Kiểm tra User
+            // ====================================================
+
+            val user =
+                UsersTable
+                    .selectAll()
+                    .where {
+                        UsersTable.id eq userId
+                    }
+                    .singleOrNull()
+                    ?: throw IllegalStateException(
+                        "User not found"
+                    )
+
+
+            val role =
+                user[UsersTable.role]
+                    .uppercase()
+
+
+            // ====================================================
+            // User phải ACTIVE
+            // ====================================================
+
+            if (
+                user[UsersTable.status]
+                    .uppercase() != "ACTIVE"
+            ) {
+
+                throw IllegalStateException(
+                    "Account is disabled"
+                )
+            }
+
+
+            // ====================================================
+            // Tìm device hiện tại của chính user
+            //
+            // Nếu đã tồn tại:
+            // -> update
+            // -> không tính là device mới
+            // ====================================================
+
             val existing =
                 DevicesTable
                     .selectAll()
@@ -39,12 +92,8 @@ class DeviceService {
                     }
                     .singleOrNull()
 
-            if (existing != null) {
 
-                /*
-                 * Device đã tồn tại
-                 * -> cập nhật thông tin
-                 */
+            if (existing != null) {
 
                 DevicesTable.update(
                     where = {
@@ -53,26 +102,32 @@ class DeviceService {
                     }
                 ) {
 
-                    it[DevicesTable.deviceName] = deviceName
+                    it[DevicesTable.deviceName] =
+                        deviceName
 
-                    it[DevicesTable.appVersion] = appVersion
+                    it[DevicesTable.appVersion] =
+                        appVersion
 
-                    it[DevicesTable.lastSeen] = now
+                    it[DevicesTable.lastSeen] =
+                        now
 
-                    it[DevicesTable.status] = "ACTIVE"
+                    it[DevicesTable.status] =
+                        "ACTIVE"
                 }
 
-                /*
-                 * IntIdTable.id trả về EntityID<Int>
-                 * nên phải lấy .value
-                 */
+
                 return@transaction existing[
                     DevicesTable.id
                 ].value
             }
-            /*
-            * Mỗi Thiết bị chỉ 1 tài khoản
-             */
+
+
+            // ====================================================
+            // Device này đã thuộc user khác?
+            //
+            // Nếu có -> từ chối
+            // ====================================================
+
             val existingOtherUser =
                 DevicesTable
                     .selectAll()
@@ -82,14 +137,65 @@ class DeviceService {
                     }
                     .singleOrNull()
 
+
             if (existingOtherUser != null) {
+
                 throw IllegalStateException(
                     "Device is already registered to another user"
                 )
             }
-            /*
-             * Device mới
-             */
+
+
+            // ====================================================
+            // ADMIN
+            //
+            // Không giới hạn số device
+            // ====================================================
+
+            if (role != ROLE_ADMIN) {
+
+                // =================================================
+                // PARENT / CHILD
+                //
+                // Chỉ được có tối đa 1 device
+                // =================================================
+
+                if (
+                    role != ROLE_PARENT &&
+                    role != ROLE_CHILD
+                ) {
+
+                    throw IllegalStateException(
+                        "Invalid user role"
+                    )
+                }
+
+
+                val deviceCount =
+                    DevicesTable
+                        .selectAll()
+                        .where {
+                            DevicesTable.userId eq userId
+                        }
+                        .count()
+
+
+                if (
+                    deviceCount >=
+                    MAX_DEVICES_PER_USER
+                ) {
+
+                    throw IllegalStateException(
+                        "Maximum $MAX_DEVICES_PER_USER device allowed for this account"
+                    )
+                }
+            }
+
+
+            // ====================================================
+            // Device mới
+            // ====================================================
+
             val inserted =
                 DevicesTable.insertAndGetId {
 
@@ -115,10 +221,7 @@ class DeviceService {
                         now
                 }
 
-            /*
-             * inserted đã là EntityID<Int>
-             * -> lấy .value để trả về Int
-             */
+
             inserted.value
         }
     }
@@ -315,4 +418,3 @@ data class DeviceInfo(
 
     val createdAt: Long
 )
-

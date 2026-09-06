@@ -1042,5 +1042,22 @@ class AssignmentService(
     }
 
 
+    fun hasUserAssignment(
+        userId: Int,
+        assignmentId: Int
+    ): Boolean {
+
+        return transaction {
+
+            UserAssignmentsTable
+                .selectAll()
+                .where {
+                    (UserAssignmentsTable.userId eq userId) and
+                            (UserAssignmentsTable.assignmentId eq assignmentId)
+                }
+                .limit(1)
+                .count() > 0
+        }
+    }
 
 }

@@ -6,7 +6,6 @@ import com.example.ktorservice.security.requireUserId
 import com.example.ktorservice.service.AuthService
 import com.example.ktorservice.service.LicenseService
 import io.ktor.http.HttpStatusCode
-import io.ktor.server.request.receive
 import io.ktor.server.request.receiveText
 import io.ktor.server.response.respond
 import io.ktor.server.routing.*
@@ -16,12 +15,17 @@ fun Route.licenseRoutes(
     licenseService: LicenseService
 ) {
 
+    // ============================================================
+    // GET /licenses/check
+    // ============================================================
+
     get("/licenses/check") {
 
         val userId =
             call.requireUserId(authService)
 
         if (userId == null) {
+
             call.respond(
                 HttpStatusCode.Unauthorized,
                 LicenseResponse(
@@ -29,6 +33,7 @@ fun Route.licenseRoutes(
                     message = "Invalid or expired token"
                 )
             )
+
             return@get
         }
 
@@ -38,6 +43,7 @@ fun Route.licenseRoutes(
                 ?.toIntOrNull()
 
         if (deviceId == null) {
+
             call.respond(
                 HttpStatusCode.BadRequest,
                 LicenseResponse(
@@ -45,6 +51,7 @@ fun Route.licenseRoutes(
                     message = "deviceId is required"
                 )
             )
+
             return@get
         }
 
@@ -66,25 +73,83 @@ fun Route.licenseRoutes(
     }
 
 
+    // ============================================================
+    // POST /licenses/create
+    //
+    // CHỈ ADMIN được phép tạo license.
+    // ============================================================
+
     post("/licenses/create") {
 
         println("========== CREATE LICENSE ==========")
         println("CREATE LICENSE ROUTE HIT")
 
+        // ------------------------------------------------------------
+        // Authenticate
+        // ------------------------------------------------------------
+
+        val adminUserId =
+            call.requireUserId(authService)
+
+        if (adminUserId == null) {
+
+            call.respond(
+                HttpStatusCode.Unauthorized,
+                LicenseResponse(
+                    active = false,
+                    message = "Invalid or expired token"
+                )
+            )
+
+            return@post
+        }
+
+        // ------------------------------------------------------------
+        // Check ADMIN role
+        // ------------------------------------------------------------
+
+        val role =
+            authService.getUserRole(adminUserId)
+                ?.uppercase()
+
+        if (role != LicenseService.ROLE_ADMIN) {
+
+            call.respond(
+                HttpStatusCode.Forbidden,
+                LicenseResponse(
+                    active = false,
+                    message = "Only ADMIN can create licenses"
+                )
+            )
+
+            return@post
+        }
+
+        // ------------------------------------------------------------
+        // Receive request
+        // ------------------------------------------------------------
+
         try {
 
-            val rawBody = call.receiveText()
+            val rawBody =
+                call.receiveText()
 
             println("RAW BODY = $rawBody")
 
             val request =
-                kotlinx.serialization.json.Json.decodeFromString<CreateLicenseRequest>(
-                    rawBody
-                )
+                kotlinx.serialization.json.Json
+                    .decodeFromString<CreateLicenseRequest>(
+                        rawBody
+                    )
 
             println("REQUEST = $request")
 
+            // --------------------------------------------------------
+            // Validate userId
+            // --------------------------------------------------------
+
             if (request.userId <= 0) {
+
                 call.respond(
                     HttpStatusCode.BadRequest,
                     LicenseResponse(
@@ -92,10 +157,16 @@ fun Route.licenseRoutes(
                         message = "Invalid userId"
                     )
                 )
+
                 return@post
             }
 
+            // --------------------------------------------------------
+            // Validate deviceId
+            // --------------------------------------------------------
+
             if (request.deviceId <= 0) {
+
                 call.respond(
                     HttpStatusCode.BadRequest,
                     LicenseResponse(
@@ -103,10 +174,16 @@ fun Route.licenseRoutes(
                         message = "Invalid deviceId"
                     )
                 )
+
                 return@post
             }
 
+            // --------------------------------------------------------
+            // Validate duration
+            // --------------------------------------------------------
+
             if (request.durationDays <= 0) {
+
                 call.respond(
                     HttpStatusCode.BadRequest,
                     LicenseResponse(
@@ -114,6 +191,7 @@ fun Route.licenseRoutes(
                         message = "Invalid durationDays"
                     )
                 )
+
                 return@post
             }
 
@@ -136,20 +214,27 @@ fun Route.licenseRoutes(
                     licenseKey = result.licenseKey,
                     type = result.type,
                     expiresAt = result.expiresAt,
-                    message = "License created successfully"
+                    message =
+                        result.message
+                            ?: "License created successfully"
                 )
             )
 
         } catch (e: Exception) {
 
-            println("========== CREATE LICENSE ERROR ==========")
+            println(
+                "========== CREATE LICENSE ERROR =========="
+            )
+
             e.printStackTrace()
 
             call.respond(
                 HttpStatusCode.InternalServerError,
                 LicenseResponse(
                     active = false,
-                    message = e.message ?: "Unknown error"
+                    message =
+                        e.message
+                            ?: "Unknown error"
                 )
             )
         }

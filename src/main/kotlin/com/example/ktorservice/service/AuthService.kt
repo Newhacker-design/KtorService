@@ -293,6 +293,24 @@ class AuthService {
         }
     }
 
+    fun getUserRole(
+        userId: Int
+    ): String? {
+
+        return transaction {
+
+            UsersTable
+                .selectAll()
+                .where {
+                    UsersTable.id eq userId
+                }
+                .singleOrNull()
+                ?.get(
+                    UsersTable.role
+                )
+        }
+    }
+
     fun logout(
         token: String
     ): Boolean {

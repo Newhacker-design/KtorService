@@ -13,6 +13,7 @@ data class LoginResponse(
     val success: Boolean,
     val token: String? = null,
     val userId: Int? = null,
+    val role: String? = null,
     val message: String? = null
 )
 
@@ -41,6 +42,7 @@ data class LicenseResponse(
     val expiresAt: Long? = null,
     val message: String? = null
 )
+
 @Serializable
 data class RegisterRequest(
     val username: String,
@@ -54,6 +56,7 @@ data class RegisterResponse(
     val username: String? = null,
     val message: String? = null
 )
+
 @Serializable
 data class CreateLicenseRequest(
     val userId: Int,
@@ -66,5 +69,12 @@ data class CreateLicenseRequest(
 data class MeResponse(
     val success: Boolean,
     val userId: Int? = null,
+    val role: String? = null,
     val message: String? = null
 )
+
+@Serializable
+data class CreateChildSessionRequest(
+    val childUserId: Int
+)
+

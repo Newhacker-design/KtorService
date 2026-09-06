@@ -26,7 +26,7 @@ fun Route.parentRoutes(
         try {
 
             // ====================================================
-            // GET PARENT USER ID FROM TOKEN
+            // GET USER ID FROM TOKEN
             // ====================================================
 
             val parentUserId =
@@ -48,6 +48,38 @@ fun Route.parentRoutes(
                 return@post
             }
 
+
+            // ====================================================
+            // CHECK ROLE
+            //
+            // PARENT -> allowed
+            // ADMIN  -> allowed
+            // CHILD  -> forbidden
+            // ====================================================
+
+            val role =
+                authService
+                    .getUserRole(parentUserId)
+                    ?.uppercase()
+
+            if (
+                role != "PARENT" &&
+                role != "ADMIN"
+            ) {
+
+                call.respond(
+                    HttpStatusCode.Forbidden,
+                    RegisterChildResponse(
+                        success = false,
+                        message =
+                            "Only Parent or Admin can create child accounts"
+                    )
+                )
+
+                return@post
+            }
+
+
             // ====================================================
             // REQUEST
             // ====================================================
@@ -61,9 +93,11 @@ fun Route.parentRoutes(
             val password =
                 request.password
 
+
             println(
-                "REGISTER CHILD REQUEST: parentUserId=$parentUserId username=$username"
+                "REGISTER CHILD REQUEST: userId=$parentUserId role=$role username=$username"
             )
+
 
             // ====================================================
             // VALIDATE USERNAME
@@ -83,6 +117,7 @@ fun Route.parentRoutes(
                 return@post
             }
 
+
             if (username.length < 3) {
 
                 call.respond(
@@ -96,6 +131,7 @@ fun Route.parentRoutes(
 
                 return@post
             }
+
 
             // ====================================================
             // VALIDATE PASSWORD
@@ -115,6 +151,7 @@ fun Route.parentRoutes(
                 return@post
             }
 
+
             if (password.length < 6) {
 
                 call.respond(
@@ -129,57 +166,82 @@ fun Route.parentRoutes(
                 return@post
             }
 
+
             // ====================================================
             // CREATE CHILD
             // ====================================================
 
             val result =
                 parentChildService.registerChild(
-                    parentUserId = parentUserId,
-                    username = username,
-                    password = password
+                    parentUserId =
+                        parentUserId,
+
+                    username =
+                        username,
+
+                    password =
+                        password
                 )
 
+
+            // ====================================================
+            // CREATE CHILD FAILED
+            // ====================================================
+
             if (!result.success) {
+
+                val message =
+                    result.message
+                        ?: "Failed to create child account"
+
 
                 val statusCode =
                     when {
 
-                        result.message
-                            ?.contains(
-                                "already exists",
-                                ignoreCase = true
-                            ) == true ->
+                        message.contains(
+                            "already exists",
+                            ignoreCase = true
+                        ) ->
                             HttpStatusCode.Conflict
 
-                        result.message
-                            ?.contains(
-                                "Maximum",
-                                ignoreCase = true
-                            ) == true ->
+
+                        message.contains(
+                            "Maximum",
+                            ignoreCase = true
+                        ) ->
                             HttpStatusCode.Conflict
 
-                        result.message
-                            ?.contains(
-                                "not found",
-                                ignoreCase = true
-                            ) == true ->
+
+                        message.contains(
+                            "not found",
+                            ignoreCase = true
+                        ) ->
                             HttpStatusCode.NotFound
+
+
+                        message.contains(
+                            "disabled",
+                            ignoreCase = true
+                        ) ->
+                            HttpStatusCode.Forbidden
+
 
                         else ->
                             HttpStatusCode.BadRequest
                     }
 
+
                 call.respond(
                     statusCode,
                     RegisterChildResponse(
                         success = false,
-                        message = result.message
+                        message = message
                     )
                 )
 
                 return@post
             }
+
 
             // ====================================================
             // SUCCESS
@@ -189,6 +251,7 @@ fun Route.parentRoutes(
                 HttpStatusCode.Created,
                 RegisterChildResponse(
                     success = true,
+
                     child =
                         ChildAccountResponse(
                             userId =
@@ -200,6 +263,7 @@ fun Route.parentRoutes(
                             status =
                                 result.status!!
                         ),
+
                     message =
                         "Child account created successfully"
                 )
@@ -225,16 +289,43 @@ fun Route.parentRoutes(
                 "=========================================="
             )
 
+
+            // ====================================================
+            // Client gửi request sai
+            // ====================================================
+
+            if (
+                e is io.ktor.server.plugins.ContentTransformationException
+            ) {
+
+                call.respond(
+                    HttpStatusCode.BadRequest,
+                    RegisterChildResponse(
+                        success = false,
+                        message =
+                            "Invalid request body"
+                    )
+                )
+
+                return@post
+            }
+
+
+            // ====================================================
+            // Lỗi server
+            // ====================================================
+
             call.respond(
-                HttpStatusCode.BadRequest,
+                HttpStatusCode.InternalServerError,
                 RegisterChildResponse(
                     success = false,
                     message =
-                        "Invalid request: ${e.message}"
+                        "Failed to create child account"
                 )
             )
         }
     }
+
 
     // ============================================================
     // GET CHILDREN
@@ -245,7 +336,7 @@ fun Route.parentRoutes(
         try {
 
             // ====================================================
-            // GET PARENT USER ID FROM TOKEN
+            // GET USER ID FROM TOKEN
             // ====================================================
 
             val parentUserId =
@@ -267,6 +358,38 @@ fun Route.parentRoutes(
                 return@get
             }
 
+
+            // ====================================================
+            // CHECK ROLE
+            //
+            // PARENT -> allowed
+            // ADMIN  -> allowed
+            // CHILD  -> forbidden
+            // ====================================================
+
+            val role =
+                authService
+                    .getUserRole(parentUserId)
+                    ?.uppercase()
+
+            if (
+                role != "PARENT" &&
+                role != "ADMIN"
+            ) {
+
+                call.respond(
+                    HttpStatusCode.Forbidden,
+                    ChildrenResponse(
+                        success = false,
+                        message =
+                            "Only Parent or Admin can access child accounts"
+                    )
+                )
+
+                return@get
+            }
+
+
             // ====================================================
             // GET CHILDREN
             // ====================================================
@@ -276,10 +399,12 @@ fun Route.parentRoutes(
                     parentUserId
                 )
 
+
             val responseChildren =
                 children.map {
 
                     ChildAccountResponse(
+
                         userId =
                             it.userId,
 
@@ -291,6 +416,7 @@ fun Route.parentRoutes(
                     )
                 }
 
+
             // ====================================================
             // RESPONSE
             // ====================================================
@@ -299,7 +425,8 @@ fun Route.parentRoutes(
                 HttpStatusCode.OK,
                 ChildrenResponse(
                     success = true,
-                    children = responseChildren
+                    children =
+                        responseChildren
                 )
             )
 
@@ -322,6 +449,7 @@ fun Route.parentRoutes(
             println(
                 "========================================"
             )
+
 
             call.respond(
                 HttpStatusCode.InternalServerError,

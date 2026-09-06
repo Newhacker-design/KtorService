@@ -1,11 +1,8 @@
 package com.example.ktorservice.routes
 
-import com.example.ktorservice.database.table.AssignmentsTable.difficulty
 import com.example.ktorservice.model.AssignedAssignmentResponse
 import com.example.ktorservice.model.AssignmentActionResponse
-import com.example.ktorservice.model.AssignmentData
 import com.example.ktorservice.model.AssignmentDetailResponse
-import com.example.ktorservice.model.AssignmentGenerateResponse
 import com.example.ktorservice.model.AssignmentListResponse
 import com.example.ktorservice.model.AssignmentQuestion
 import com.example.ktorservice.model.AssignmentStorageData
@@ -28,47 +25,29 @@ fun Route.assignmentRoutes(
     assignmentService: AssignmentService,
     parentChildService: ParentChildService
 ) {
-// ============================================================
-// GET /assignments/next
-//
-// Lấy bài tiếp theo cho phụ huynh.
-//
-// Nếu kho còn bài:
-//     lấy bài cũ
-//
-// Nếu kho hết:
-//     AI tạo bài mới
-//
-// Sau khi lấy được:
-//     ghi user_assignments ngay
-// ============================================================
 
     // ============================================================
-// GET /assignments/next
-//
-// Parent lấy bài cho một child đã chọn.
-//
-// JWT:
-//     parentUserId = tài khoản cha
-//
-// Query:
-//     childUserId = tài khoản con được chọn
-//
-// Server:
-//     kiểm tra parent -> child
-//
-// Sau đó:
-//     AssignmentService dùng childUserId
-//
-// UserAssignmentsTable.userId = childUserId
-// ============================================================
+    // GET /assignments/next
+    //
+    // ADMIN:
+    //     Có thể lấy bài cho bất kỳ CHILD nào.
+    //
+    // PARENT:
+    //     Chỉ có thể lấy bài cho CHILD thuộc parent đó.
+    //
+    // CHILD:
+    //     Không được gọi endpoint này.
+    //
+    // Assignment được lưu vào user_assignments với:
+    //     userId = childUserId
+    // ============================================================
 
     get("/assignments/next") {
 
         try {
 
             // ========================================================
-            // 1. LẤY PARENT USER ID TỪ JWT / SESSION
+            // 1. AUTHENTICATION
             // ========================================================
 
             val parentUserId =
@@ -88,7 +67,33 @@ fun Route.assignmentRoutes(
             }
 
             // ========================================================
-            // 2. LẤY CHILD USER ID
+            // 2. ROLE
+            // ========================================================
+
+            val role =
+                authService
+                    .getUserRole(parentUserId)
+                    ?.uppercase()
+
+            if (
+                role != ParentChildService.ROLE_ADMIN &&
+                role != ParentChildService.ROLE_PARENT
+            ) {
+
+                call.respond(
+                    HttpStatusCode.Forbidden,
+                    UserAssignmentResponse(
+                        success = false,
+                        message =
+                            "Only ADMIN or PARENT can request assignment for a child"
+                    )
+                )
+
+                return@get
+            }
+
+            // ========================================================
+            // 3. CHILD USER ID
             // ========================================================
 
             val childUserId =
@@ -110,42 +115,66 @@ fun Route.assignmentRoutes(
             }
 
             // ========================================================
-            // 3. KIỂM TRA PARENT -> CHILD
+            // 4. CHECK PARENT -> CHILD
+            //
+            // ADMIN:
+            //     bypass relation check.
+            //
+            // PARENT:
+            //     must own the child.
             // ========================================================
 
-            val isChild =
-                parentChildService.isChildOfParent(
-                    parentUserId = parentUserId,
-                    childUserId = childUserId
-                )
-
-            if (!isChild) {
+            if (role == ParentChildService.ROLE_ADMIN) {
 
                 println(
-                    "========== CHILD ACCESS DENIED =========="
+                    "========== ADMIN ASSIGNMENT ACCESS =========="
                 )
 
                 println(
-                    "PARENT USER ID = $parentUserId"
+                    "ADMIN USER ID = $parentUserId"
                 )
 
                 println(
                     "CHILD USER ID = $childUserId"
                 )
 
-                call.respond(
-                    HttpStatusCode.Forbidden,
-                    UserAssignmentResponse(
-                        success = false,
-                        message = "Child account does not belong to this parent"
-                    )
-                )
+            } else {
 
-                return@get
+                val isChild =
+                    parentChildService.isChildOfParent(
+                        parentUserId = parentUserId,
+                        childUserId = childUserId
+                    )
+
+                if (!isChild) {
+
+                    println(
+                        "========== CHILD ACCESS DENIED =========="
+                    )
+
+                    println(
+                        "PARENT USER ID = $parentUserId"
+                    )
+
+                    println(
+                        "CHILD USER ID = $childUserId"
+                    )
+
+                    call.respond(
+                        HttpStatusCode.Forbidden,
+                        UserAssignmentResponse(
+                            success = false,
+                            message =
+                                "Child account does not belong to this parent"
+                        )
+                    )
+
+                    return@get
+                }
             }
 
             // ========================================================
-            // 4. ĐỌC THAM SỐ ASSIGNMENT
+            // 5. PARAMETERS
             // ========================================================
 
             val grade =
@@ -172,7 +201,7 @@ fun Route.assignmentRoutes(
                     }
 
             // ========================================================
-            // 5. VALIDATE DIFFICULTY
+            // 6. VALIDATE DIFFICULTY
             // ========================================================
 
             if (difficulty == null) {
@@ -190,7 +219,7 @@ fun Route.assignmentRoutes(
             }
 
             // ========================================================
-            // 6. VALIDATE GRADE
+            // 7. VALIDATE GRADE
             // ========================================================
 
             if (grade == null || grade !in 1..12) {
@@ -207,7 +236,7 @@ fun Route.assignmentRoutes(
             }
 
             // ========================================================
-            // 7. VALIDATE SUBJECT
+            // 8. VALIDATE SUBJECT
             // ========================================================
 
             if (subject.isNullOrBlank()) {
@@ -224,7 +253,7 @@ fun Route.assignmentRoutes(
             }
 
             // ========================================================
-            // 8. LOG
+            // 9. LOG
             // ========================================================
 
             println(
@@ -232,7 +261,11 @@ fun Route.assignmentRoutes(
             )
 
             println(
-                "PARENT USER ID = $parentUserId"
+                "REQUEST USER ID = $parentUserId"
+            )
+
+            println(
+                "ROLE = $role"
             )
 
             println(
@@ -256,13 +289,13 @@ fun Route.assignmentRoutes(
             )
 
             // ========================================================
-            // 9. LẤY BÀI CHO CHILD
+            // 10. GET ASSIGNMENT FOR CHILD
             //
             // QUAN TRỌNG:
             //
-            // KHÔNG truyền parentUserId.
+            // userId = childUserId
             //
-            // Phải truyền childUserId.
+            // Không được dùng parentUserId ở đây.
             // ========================================================
 
             val result =
@@ -275,7 +308,7 @@ fun Route.assignmentRoutes(
                 )
 
             // ========================================================
-            // 10. LOG KẾT QUẢ
+            // 11. LOG RESULT
             // ========================================================
 
             println(
@@ -299,7 +332,7 @@ fun Route.assignmentRoutes(
             )
 
             // ========================================================
-            // 11. RESPONSE
+            // 12. RESPONSE
             // ========================================================
 
             call.respond(
@@ -407,9 +440,18 @@ fun Route.assignmentRoutes(
             )
         }
     }
+
+
     // ============================================================
-// GET ASSIGNMENT FROM STORAGE
-// ============================================================
+    // GET /assignments/{id}
+    //
+    // ADMIN:
+    //     Có thể xem bất kỳ assignment nào trong storage.
+    //
+    // PARENT / CHILD:
+    //     Chỉ được xem assignment đã được assign cho chính mình.
+    //
+    // ============================================================
 
     get("/assignments/{id}") {
 
@@ -448,16 +490,103 @@ fun Route.assignmentRoutes(
                 return@get
             }
 
-            println("========== GET ASSIGNMENT FROM STORAGE ==========")
-            println("USER ID = $userId")
-            println("ASSIGNMENT ID = $id")
+            // ========================================================
+            // ROLE
+            // ========================================================
+
+            val role =
+                authService
+                    .getUserRole(userId)
+                    ?.uppercase()
+
+            if (role == null) {
+
+                call.respond(
+                    HttpStatusCode.Unauthorized,
+                    AssignmentDetailResponse(
+                        success = false,
+                        message = "User not found"
+                    )
+                )
+
+                return@get
+            }
+
+            // ========================================================
+            // ADMIN:
+            //     bypass user_assignment check.
+            //
+            // PARENT / CHILD:
+            //     assignment must belong to current user.
+            // ========================================================
+
+            if (role != ParentChildService.ROLE_ADMIN) {
+
+                val hasAssignment =
+                    assignmentService.hasUserAssignment(
+                        userId = userId,
+                        assignmentId = id
+                    )
+
+                if (!hasAssignment) {
+
+                    println(
+                        "========== ASSIGNMENT ACCESS DENIED =========="
+                    )
+
+                    println(
+                        "USER ID = $userId"
+                    )
+
+                    println(
+                        "ROLE = $role"
+                    )
+
+                    println(
+                        "ASSIGNMENT ID = $id"
+                    )
+
+                    call.respond(
+                        HttpStatusCode.Forbidden,
+                        AssignmentDetailResponse(
+                            success = false,
+                            message =
+                                "You do not have access to this assignment"
+                        )
+                    )
+
+                    return@get
+                }
+            }
+
+            println(
+                "========== GET ASSIGNMENT FROM STORAGE =========="
+            )
+
+            println(
+                "USER ID = $userId"
+            )
+
+            println(
+                "ROLE = $role"
+            )
+
+            println(
+                "ASSIGNMENT ID = $id"
+            )
+
+            // ========================================================
+            // GET ASSIGNMENT
+            // ========================================================
 
             val result =
                 assignmentService.getById(id)
 
             if (result == null) {
 
-                println("ASSIGNMENT NOT FOUND")
+                println(
+                    "ASSIGNMENT NOT FOUND"
+                )
 
                 call.respond(
                     HttpStatusCode.NotFound,
@@ -470,37 +599,88 @@ fun Route.assignmentRoutes(
                 return@get
             }
 
-            println("ASSIGNMENT FOUND")
-            println("ASSIGNMENT ID = ${result.id}")
-            println("TITLE = ${result.title}")
-            println("GRADE = ${result.grade}")
-            println("SUBJECT = ${result.subject}")
+            println(
+                "ASSIGNMENT FOUND"
+            )
+
+            println(
+                "ASSIGNMENT ID = ${result.id}"
+            )
+
+            println(
+                "TITLE = ${result.title}"
+            )
+
+            println(
+                "GRADE = ${result.grade}"
+            )
+
+            println(
+                "SUBJECT = ${result.subject}"
+            )
+
+            // ========================================================
+            // RESPONSE
+            //
+            // Không trả answerKey / gradingGuide.
+            // ========================================================
 
             call.respond(
                 HttpStatusCode.OK,
                 AssignmentDetailResponse(
+
                     success = true,
-                    assignment = AssignmentStudentData(
-                        id = result.id,
-                        grade = result.grade,
-                        subject = result.subject,
-                        topic = result.topic,
-                        title = result.title,
-                        difficulty = result.difficulty,
 
-                        questions = result.questionMetadata.map { metadata ->
-                            AssignmentQuestion(
-                                id = metadata.id,
-                                question = metadata.question,
-                                points = metadata.points,
-                                answerType = metadata.answerType,
-                                gradingMethod = metadata.gradingMethod
-                            )
-                        },
+                    assignment =
+                        AssignmentStudentData(
 
-                        content = result.content,
-                        totalScore = result.totalScore
-                    )
+                            id =
+                                result.id,
+
+                            grade =
+                                result.grade,
+
+                            subject =
+                                result.subject,
+
+                            topic =
+                                result.topic,
+
+                            title =
+                                result.title,
+
+                            difficulty =
+                                result.difficulty,
+
+                            questions =
+                                result.questionMetadata.map {
+                                        metadata ->
+
+                                    AssignmentQuestion(
+
+                                        id =
+                                            metadata.id,
+
+                                        question =
+                                            metadata.question,
+
+                                        points =
+                                            metadata.points,
+
+                                        answerType =
+                                            metadata.answerType,
+
+                                        gradingMethod =
+                                            metadata.gradingMethod
+                                    )
+                                },
+
+                            content =
+                                result.content,
+
+                            totalScore =
+                                result.totalScore
+                        )
                 )
             )
 
@@ -523,10 +703,24 @@ fun Route.assignmentRoutes(
             )
         }
     }
-// ============================================================
-// GET /assignments
-// GET ASSIGNMENTS FROM STORAGE
-// ============================================================
+
+
+    // ============================================================
+    // GET /assignments
+    //
+    // ĐÂY LÀ STORAGE ENDPOINT.
+    //
+    // Nó trả:
+    //     answerKey
+    //     gradingGuide
+    //
+    // Vì vậy:
+    //
+    // ADMIN  -> được phép
+    // PARENT -> 403
+    // CHILD  -> 403
+    //
+    // ============================================================
 
     get("/assignments") {
 
@@ -548,6 +742,33 @@ fun Route.assignmentRoutes(
                 return@get
             }
 
+            // ========================================================
+            // ROLE
+            // ========================================================
+
+            val role =
+                authService
+                    .getUserRole(userId)
+                    ?.uppercase()
+
+            if (role != ParentChildService.ROLE_ADMIN) {
+
+                call.respond(
+                    HttpStatusCode.Forbidden,
+                    AssignmentListResponse(
+                        success = false,
+                        message =
+                            "Only ADMIN can access assignment storage"
+                    )
+                )
+
+                return@get
+            }
+
+            // ========================================================
+            // PARAMETERS
+            // ========================================================
+
             val grade =
                 call.request
                     .queryParameters["grade"]
@@ -567,29 +788,70 @@ fun Route.assignmentRoutes(
                     ?.uppercase()
                     ?.let {
                         runCatching {
-                            com.example.ktorservice.service.AIService.Difficulty.valueOf(it)
+                            AIService.Difficulty.valueOf(it)
                         }.getOrNull()
                     }
+
+            // ========================================================
+            // DIFFICULTY IS REQUIRED
+            // Giữ nguyên behavior cũ.
+            // ========================================================
+
             if (difficulty == null) {
+
                 call.respond(
                     HttpStatusCode.BadRequest,
-                    UserAssignmentResponse(
+                    AssignmentListResponse(
                         success = false,
-                        message = "Invalid difficulty. Use EASY, MEDIUM or HARD"
+                        message =
+                            "Invalid difficulty. Use EASY, MEDIUM or HARD"
                     )
                 )
 
                 return@get
             }
 
+            // ========================================================
+            // LOG
+            // ========================================================
+
             println(
                 "========== GET ASSIGNMENT STORAGE =========="
             )
 
-            println("USER ID = $userId")
-            println("GRADE = $grade")
-            println("SUBJECT = $subject")
-            println("TOPIC = $topic")
+            println(
+                "USER ID = $userId"
+            )
+
+            println(
+                "ROLE = $role"
+            )
+
+            println(
+                "GRADE = $grade"
+            )
+
+            println(
+                "SUBJECT = $subject"
+            )
+
+            println(
+                "TOPIC = $topic"
+            )
+
+            println(
+                "DIFFICULTY = $difficulty"
+            )
+
+            // ========================================================
+            // GET STORAGE
+            //
+            // LƯU Ý:
+            // AssignmentService hiện tại của bạn chưa nhận
+            // difficulty ở getAllAssignments().
+            //
+            // Vì vậy chưa giả vờ filter difficulty ở đây.
+            // ========================================================
 
             val assignments =
                 assignmentService.getAllAssignments(
@@ -602,23 +864,48 @@ fun Route.assignmentRoutes(
                 "ASSIGNMENT STORAGE COUNT = ${assignments.size}"
             )
 
+            // ========================================================
+            // RESPONSE
+            //
+            // ADMIN mới nhận được answerKey / gradingGuide.
+            // ========================================================
+
             call.respond(
                 HttpStatusCode.OK,
                 AssignmentListResponse(
                     success = true,
+
                     assignments =
                         assignments.map { assignment ->
 
                             AssignmentStorageData(
-                                id = assignment.id,
-                                grade = assignment.grade,
-                                subject = assignment.subject,
-                                topic = assignment.topic,
-                                title = assignment.title,
-                                content = assignment.content,
-                                answerKey = assignment.answerKey,
-                                gradingGuide = assignment.gradingGuide,
-                                totalScore = assignment.totalScore
+
+                                id =
+                                    assignment.id,
+
+                                grade =
+                                    assignment.grade,
+
+                                subject =
+                                    assignment.subject,
+
+                                topic =
+                                    assignment.topic,
+
+                                title =
+                                    assignment.title,
+
+                                content =
+                                    assignment.content,
+
+                                answerKey =
+                                    assignment.answerKey,
+
+                                gradingGuide =
+                                    assignment.gradingGuide,
+
+                                totalScore =
+                                    assignment.totalScore
                             )
                         }
                 )
@@ -644,60 +931,168 @@ fun Route.assignmentRoutes(
         }
     }
 
+
+    // ============================================================
+    // GET /assignments/my
+    //
+    // ADMIN:
+    //     Có thể gọi, thường sẽ trả danh sách rỗng nếu ADMIN
+    //     chưa có user_assignments.
+    //
+    // PARENT / CHILD:
+    //     Chỉ lấy assignment của chính user hiện tại.
+    //
+    // ============================================================
+
     get("/assignments/my") {
-        val userId = call.requireUserId(authService) ?: return@get call.respond( HttpStatusCode.Unauthorized,
-            AssignedAssignmentResponse( success = false, message = "Authentication required" ) )
-        try {
-            val results = assignmentService.getUserAssignments( userId = userId )
-            val assignments = results.map { result ->
-                UserAssignmentResponse(
-                    success = true,
-                    id = result.id,
-                    assignmentId = result.assignmentId,
-                    userId = result.userId,
-                    status = result.status,
-                    answer = result.answer,
-                    score = result.score,
-                    feedback = result.feedback,
-                    startedAt = result.startedAt,
-                    completedAt = result.completedAt,
-                    assignment = AssignmentStudentData(
-                        id = result.assignment.id,
-                        grade = result.assignment.grade,
-                        subject = result.assignment.subject,
-                        topic = result.assignment.topic,
-                        title = result.assignment.title,
-                        difficulty = result.assignment.difficulty,
-                        questions = result.questionMetadata.map { metadata ->
-                            AssignmentQuestion(
-                                id = metadata.id,
-                                question = metadata.question,
-                                points = metadata.points,
-                                answerType = metadata.answerType,
-                                gradingMethod = metadata.gradingMethod
-                            )
-                        },
-                        content = result.assignment.content,
-                        totalScore = result.assignment.totalScore
-                    )
-                )
-            }
+
+        val userId =
+            call.requireUserId(authService)
+
+        if (userId == null) {
+
             call.respond(
+                HttpStatusCode.Unauthorized,
+                AssignedAssignmentResponse(
+                    success = false,
+                    message = "Authentication required"
+                )
+            )
+
+            return@get
+        }
+
+        try {
+
+            val results =
+                assignmentService.getUserAssignments(
+                    userId = userId
+                )
+
+            val assignments =
+                results.map { result ->
+
+                    UserAssignmentResponse(
+
+                        success = true,
+
+                        id =
+                            result.id,
+
+                        assignmentId =
+                            result.assignmentId,
+
+                        userId =
+                            result.userId,
+
+                        status =
+                            result.status,
+
+                        answer =
+                            result.answer,
+
+                        score =
+                            result.score,
+
+                        feedback =
+                            result.feedback,
+
+                        startedAt =
+                            result.startedAt,
+
+                        completedAt =
+                            result.completedAt,
+
+                        assignment =
+                            AssignmentStudentData(
+
+                                id =
+                                    result.assignment.id,
+
+                                grade =
+                                    result.assignment.grade,
+
+                                subject =
+                                    result.assignment.subject,
+
+                                topic =
+                                    result.assignment.topic,
+
+                                title =
+                                    result.assignment.title,
+
+                                difficulty =
+                                    result.assignment.difficulty,
+
+                                questions =
+                                    result.questionMetadata.map {
+                                            metadata ->
+
+                                        AssignmentQuestion(
+
+                                            id =
+                                                metadata.id,
+
+                                            question =
+                                                metadata.question,
+
+                                            points =
+                                                metadata.points,
+
+                                            answerType =
+                                                metadata.answerType,
+
+                                            gradingMethod =
+                                                metadata.gradingMethod
+                                        )
+                                    },
+
+                                content =
+                                    result.assignment.content,
+
+                                totalScore =
+                                    result.assignment.totalScore
+                            )
+                    )
+                }
+
+            call.respond(
+                HttpStatusCode.OK,
                 AssignedAssignmentResponse(
                     success = true,
                     assignments = assignments
                 )
             )
+
         } catch (e: Exception) {
+
+            println(
+                "========== GET MY ASSIGNMENTS ERROR =========="
+            )
+
+            e.printStackTrace()
+
             call.respond(
                 HttpStatusCode.InternalServerError,
                 AssignedAssignmentResponse(
                     success = false,
-                    message = e.message ?: "Failed to load assignments"
+                    message =
+                        e.message
+                            ?: "Failed to load assignments"
                 )
             )
         }
     }
+
+
+    // ============================================================
+    // POST /assignments/{id}/start
+    //
+    // ID ở đây là userAssignmentId.
+    //
+    // AssignmentService đã giới hạn theo userId hiện tại.
+    // ============================================================
+
     post("/assignments/{id}/start") {
 
         try {
@@ -739,8 +1134,13 @@ fun Route.assignmentRoutes(
                 "========== START ASSIGNMENT =========="
             )
 
-            println("USER ID = $userId")
-            println("USER ASSIGNMENT ID = $id")
+            println(
+                "USER ID = $userId"
+            )
+
+            println(
+                "USER ASSIGNMENT ID = $id"
+            )
 
             val result =
                 assignmentService.startAssignment(
@@ -789,6 +1189,16 @@ fun Route.assignmentRoutes(
             )
         }
     }
+
+
+    // ============================================================
+    // POST /assignments/{id}/submit
+    //
+    // ID = userAssignmentId.
+    //
+    // User chỉ submit assignment thuộc chính mình.
+    // ============================================================
+
     post("/assignments/{id}/submit") {
 
         try {
@@ -846,8 +1256,13 @@ fun Route.assignmentRoutes(
                 "========== SUBMIT ASSIGNMENT =========="
             )
 
-            println("USER ID = $userId")
-            println("USER ASSIGNMENT ID = $id")
+            println(
+                "USER ID = $userId"
+            )
+
+            println(
+                "USER ASSIGNMENT ID = $id"
+            )
 
             val result =
                 assignmentService.submitAssignment(
@@ -876,7 +1291,8 @@ fun Route.assignmentRoutes(
                     status = result.status,
                     score = result.score,
                     feedback = result.feedback,
-                    message = "Assignment submitted successfully"
+                    message =
+                        "Assignment submitted successfully"
                 )
             )
 
@@ -899,17 +1315,37 @@ fun Route.assignmentRoutes(
             )
         }
     }
+
+
+    // ============================================================
+    // DEBUG POSTGRES
+    //
+    // Tạm thời giữ nguyên để debug Tailscale/PostgreSQL.
+    // ============================================================
+
     get("/debug/postgres") {
+
         try {
-            val socket = java.net.Socket()
+
+            val socket =
+                java.net.Socket()
+
             socket.connect(
-                java.net.InetSocketAddress("100.76.246.38", 5432),
+                java.net.InetSocketAddress(
+                    "100.76.246.38",
+                    5432
+                ),
                 5000
             )
+
             socket.close()
 
-            call.respondText("POSTGRES TCP OK")
+            call.respondText(
+                "POSTGRES TCP OK"
+            )
+
         } catch (e: Exception) {
+
             call.respondText(
                 "POSTGRES TCP FAILED: ${e.javaClass.name}: ${e.message}",
                 status = HttpStatusCode.InternalServerError
