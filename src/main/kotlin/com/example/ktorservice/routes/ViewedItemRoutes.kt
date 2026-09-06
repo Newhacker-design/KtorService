@@ -2,6 +2,7 @@
 package com.example.ktorservice.routes
 
 import com.example.ktorservice.database.VideosTable
+import com.example.ktorservice.database.table.ParentChildrenTable
 import com.example.ktorservice.model.CallEventRequest
 import com.example.ktorservice.model.CallEventResponse
 import com.example.ktorservice.model.ControlRequest
@@ -46,16 +47,46 @@ import java.util.TimeZone
 import io.ktor.utils.io.jvm.javaio.toInputStream
 import io.ktor.server.http.content.staticFiles
 import io.ktor.server.http.content.default
+import kotlinx.coroutines.sync.Semaphore
 import org.jetbrains.exposed.sql.SortOrder
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.and
 import org.jetbrains.exposed.sql.insert
+import org.jetbrains.exposed.sql.or
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.transactions.transaction
+import java.time.ZoneId
+import java.time.ZonedDateTime
 import java.util.concurrent.ConcurrentHashMap
 
 private const val MAX_LOCATIONS = 50
 private const val MAX_VIDEOS = 10
 
+
+// ============================================================
+// GLOBAL CLEANUP LOCK
+// ============================================================
+
+private val videoCleanupLock =
+    Any()
+
+private const val MAX_VIDEO_SIZE = 100L * 1024L * 1024L //TỐI ĐA 100MB/1VIDEO
+
+private const val MAX_DAILY_UPLOADS = 3// 1 NGÀY CHỈ ĐƯỢC UPLOAD 3 LẦN
+private const val MAX_CONCURRENT_UPLOADS = 5//TỐI ĐA 5 NGƯỜI CÙNG UPLOAD 1 LÚC
+
+private val uploadSemaphore = Semaphore(MAX_CONCURRENT_UPLOADS)
+
+// 120 giây giữa hai lần upload thành công.
+private const val MIN_UPLOAD_INTERVAL_MS = 120_000L
+/** * Lưu thời điểm upload thành công gần nhất * của từng parent.
+ * * * parentUserId -> timestamp */
+private val lastVideoUploadTime = ConcurrentHashMap<Int, Long>()
+/** * Lock riêng cho từng parent.
+ * * * Mục đích:
+ * * Nếu cùng một parent gửi nhiều request
+ * * upload đồng thời, các request sẽ phải * lần lượt kiểm tra quota. */
+private val videoUploadLocks = ConcurrentHashMap<Int, Any>()
 fun Route.viewedItemRoutes(
     repository: ViewedItemRepository,
     locationRepository: LocationRepository,
@@ -319,6 +350,7 @@ fun Route.viewedItemRoutes(
         }
     }
 
+
     post("/videos/upload") {
 
         println("========== UPLOAD START ==========")
@@ -326,6 +358,14 @@ fun Route.viewedItemRoutes(
         var savedFile: File? = null
         var childUserId: Int? = null
         var tempFile: File? = null
+
+        // ============================================================
+        // SEMAPHORE STATE
+        //
+        // Chỉ release nếu request thực sự acquire được slot.
+        // ============================================================
+
+        var uploadPermitAcquired = false
 
         try {
 
@@ -351,13 +391,225 @@ fun Route.viewedItemRoutes(
             )
 
             // ============================================================
-            // READ MULTIPART
+            // EARLY DAILY LIMIT
+            //
+            // Chặn sớm trước khi nhận file.
+            // Đây chỉ là lớp bảo vệ đầu tiên.
+            //
+            // Lớp kiểm tra chính vẫn nằm bên trong lock.
             // ============================================================
+
+            fun getVietnamDayTimestamps(): Pair<Long, Long> {
+
+                val vietnamZone =
+                    ZoneId.of("Asia/Ho_Chi_Minh")
+
+                val now =
+                    ZonedDateTime.now(vietnamZone)
+
+                val startOfDay =
+                    now
+                        .toLocalDate()
+                        .atStartOfDay(vietnamZone)
+
+                val startOfNextDay =
+                    startOfDay.plusDays(1)
+
+                return Pair(
+                    startOfDay
+                        .toInstant()
+                        .toEpochMilli(),
+
+                    startOfNextDay
+                        .toInstant()
+                        .toEpochMilli()
+                )
+            }
+
+            fun getDailyUploadCount(): Int {
+
+                val (
+                    startTimestamp,
+                    nextDayTimestamp
+                ) =
+                    getVietnamDayTimestamps()
+
+                return transaction {
+
+                    // ====================================================
+                    // LẤY TẤT CẢ CHILD CỦA PARENT
+                    // ====================================================
+
+                    val childIds =
+                        ParentChildrenTable
+                            .selectAll()
+                            .where {
+                                ParentChildrenTable.parentUserId eq
+                                        parentUserId
+                            }
+                            .map {
+                                it[
+                                    ParentChildrenTable.childUserId
+                                ]
+                            }
+
+                    if (childIds.isEmpty()) {
+
+                        0
+
+                    } else {
+
+                        // =================================================
+                        // KHÔNG DÙNG inList
+                        //
+                        // Tạo:
+                        //
+                        // childUserId = 6
+                        // OR
+                        // childUserId = 7
+                        // OR
+                        // childUserId = 9
+                        // =================================================
+
+                        val childCondition =
+                            childIds
+                                .map { id ->
+                                    VideosTable.childUserId eq id
+                                }
+                                .reduce { condition1, condition2 ->
+                                    condition1 or condition2
+                                }
+
+                        VideosTable
+                            .selectAll()
+                            .where {
+                                childCondition and
+                                        (
+                                                VideosTable.createdAt greaterEq
+                                                        startTimestamp
+                                                ) and
+                                        (
+                                                VideosTable.createdAt less
+                                                        nextDayTimestamp
+                                                )
+                            }
+                            .count()
+                            .toInt()
+                    }
+                }
+            }
+
+            // ============================================================
+            // EARLY COOLDOWN CHECK
+            // ============================================================
+
+            val currentTime =
+                System.currentTimeMillis()
+
+            val lastUploadTime =
+                lastVideoUploadTime[parentUserId]
+
+            if (
+                lastUploadTime != null &&
+                currentTime - lastUploadTime <
+                MIN_UPLOAD_INTERVAL_MS
+            ) {
+
+                val remainingSeconds =
+                    (
+                            MIN_UPLOAD_INTERVAL_MS -
+                                    (
+                                            currentTime -
+                                                    lastUploadTime
+                                            )
+                            ) / 1000L
+
+                println(
+                    "UPLOAD DENIED EARLY: " +
+                            "cooldown=${remainingSeconds}s"
+                )
+
+                call.respond(
+                    HttpStatusCode.TooManyRequests,
+                    "Please wait ${remainingSeconds.coerceAtLeast(1)} seconds before uploading another video."
+                )
+
+                return@post
+            }
+
+            // ============================================================
+            // EARLY DAILY LIMIT CHECK
+            // ============================================================
+
+            val earlyDailyUploadCount =
+                getDailyUploadCount()
+
+            println(
+                "EARLY DAILY UPLOAD COUNT = " +
+                        "$earlyDailyUploadCount / " +
+                        "$MAX_DAILY_UPLOADS"
+            )
+
+            if (
+                earlyDailyUploadCount >=
+                MAX_DAILY_UPLOADS
+            ) {
+
+                println(
+                    "UPLOAD DENIED EARLY: " +
+                            "daily limit reached"
+                )
+
+                call.respond(
+                    HttpStatusCode.TooManyRequests,
+                    "Daily video upload limit reached. Maximum is 3 videos per day."
+                )
+
+                return@post
+            }
+
+// ============================================================
+// ACQUIRE GLOBAL UPLOAD SLOT
+//
+// Tối đa 5 request được đi vào quá trình nhận file cùng lúc.
+//
+// Ví dụ:
+//   Upload A -> slot 1
+//   Upload B -> slot 2
+//   Upload C -> slot 3
+//   Upload D -> slot 4
+//   Upload E -> slot 5
+//   Upload F -> WAIT
+//
+// Khi một upload hoàn thành:
+//   Upload F -> được cấp slot
+// ============================================================
+
+            println(
+                "Waiting for upload slot... " +
+                        "active limit = $MAX_CONCURRENT_UPLOADS"
+            )
+
+            uploadSemaphore.acquire()
+
+            uploadPermitAcquired = true
+
+            println(
+                "Upload slot acquired"
+            )
+
+// ============================================================
+// READ MULTIPART
+//
+// GIỮ NGUYÊN LIMIT 500 MB BẠN ĐÃ CẤU HÌNH
+// ============================================================
 
             val multipart =
                 call.receiveMultipart(
-                    formFieldLimit = 500L * 1024 * 1024
+                    formFieldLimit =
+                        500L * 1024 * 1024
                 )
+
 
             var originalFileName: String? = null
 
@@ -373,7 +625,10 @@ fun Route.viewedItemRoutes(
 
                         is PartData.FormItem -> {
 
-                            if (part.name == "childUserId") {
+                            if (
+                                part.name ==
+                                "childUserId"
+                            ) {
 
                                 childUserId =
                                     part.value
@@ -413,7 +668,8 @@ fun Route.viewedItemRoutes(
                                 )
 
                             println(
-                                "Receiving temporary file: ${temp.absolutePath}"
+                                "Receiving temporary file: " +
+                                        temp.absolutePath
                             )
 
                             part.provider()
@@ -438,13 +694,36 @@ fun Route.viewedItemRoutes(
                                                     break
                                                 }
 
+                                                total += count
+
+                                                // =================================================
+                                                // 100 MB LIMIT
+                                                // =================================================
+
+                                                if (
+                                                    total >
+                                                    MAX_VIDEO_SIZE
+                                                ) {
+
+                                                    println(
+                                                        "UPLOAD REJECTED: " +
+                                                                "video exceeds 100 MB"
+                                                    )
+
+                                                    throw VideoTooLargeException(
+                                                        "Video exceeds the maximum size of 100 MB"
+                                                    )
+                                                }
+
                                                 output.write(
                                                     buffer,
                                                     0,
                                                     count
                                                 )
 
-                                                total += count
+                                                // =================================================
+                                                // LOG MỖI ~10 MB
+                                                // =================================================
 
                                                 if (
                                                     total %
@@ -453,7 +732,8 @@ fun Route.viewedItemRoutes(
                                                 ) {
 
                                                     println(
-                                                        "Received ${total / 1024 / 1024} MB"
+                                                        "Received " +
+                                                                "${total / 1024 / 1024} MB"
                                                     )
                                                 }
                                             }
@@ -506,20 +786,25 @@ fun Route.viewedItemRoutes(
                     }
 
             // ============================================================
-            // CHECK PARENT -> CHILD RELATION
+            // CHECK PARENT -> CHILD
             // ============================================================
 
             val isChild =
                 parentChildService.isChildOfParent(
-                    parentUserId = parentUserId,
-                    childUserId = targetChildUserId
+                    parentUserId =
+                        parentUserId,
+
+                    childUserId =
+                        targetChildUserId
                 )
 
             if (!isChild) {
 
                 println(
-                    "UPLOAD DENIED: parentUserId=$parentUserId " +
-                            "does not own childUserId=$targetChildUserId"
+                    "UPLOAD DENIED: " +
+                            "parentUserId=$parentUserId " +
+                            "does not own " +
+                            "childUserId=$targetChildUserId"
                 )
 
                 call.respond(
@@ -556,118 +841,343 @@ fun Route.viewedItemRoutes(
                     ?: "video_${System.currentTimeMillis()}.mp4"
 
             // ============================================================
-            // FINAL VIDEO DIRECTORY
+            // FINAL FILE SIZE CHECK
             // ============================================================
 
-            val videoDir =
-                File("/app/videos")
+            val uploadedFileSize =
+                temp.length()
 
-            videoDir.mkdirs()
+            println(
+                "UPLOADED FILE SIZE = " +
+                        "$uploadedFileSize bytes"
+            )
 
-            val file =
-                File(
-                    videoDir,
-                    fileName
-                )
-
-            // ============================================================
-            // CHECK DUPLICATE FILE NAME
-            // ============================================================
-
-            val alreadyExists =
-                transaction {
-
-                    VideosTable
-                        .selectAll()
-                        .where {
-                            VideosTable.fileName eq fileName
-                        }
-                        .any()
-                }
-
-            if (alreadyExists || file.exists()) {
+            if (
+                uploadedFileSize >
+                MAX_VIDEO_SIZE
+            ) {
 
                 println(
-                    "VIDEO ALREADY EXISTS: $fileName"
+                    "UPLOAD DENIED: " +
+                            "file size exceeds 100 MB"
                 )
 
                 call.respond(
-                    HttpStatusCode.Conflict,
-                    "Video file already exists: $fileName"
+                    HttpStatusCode(
+                        413,
+                        "Content Too Large"
+                    ),
+                    "Video size must not exceed 100 MB"
                 )
 
                 return@post
             }
 
             // ============================================================
-            // MOVE TEMP FILE TO FINAL LOCATION
+            // GET LOCK
             // ============================================================
 
-            if (!temp.renameTo(file)) {
-
-                throw IllegalStateException(
-                    "Cannot move temporary video to final location"
-                )
-            }
-
-            savedFile =
-                file
-
-            println(
-                "VIDEO SAVED: ${file.absolutePath}"
-            )
-
-            println(
-                "VIDEO SIZE: ${file.length()} bytes"
-            )
+            val uploadLock =
+                videoUploadLocks.computeIfAbsent(
+                    parentUserId
+                ) {
+                    Any()
+                }
 
             // ============================================================
-            // SAVE VIDEO METADATA
+            // RESULT CỦA LOCK
+            //
+            // TUYỆT ĐỐI KHÔNG call.respond() TRONG synchronized.
             // ============================================================
 
-            val createdAt =
-                System.currentTimeMillis()
+            var rejectedStatus:
+                    HttpStatusCode? = null
 
-            transaction {
+            var rejectedMessage:
+                    String? = null
 
-                VideosTable.insert {
+            var uploadSucceeded =
+                false
 
-                    it[VideosTable.childUserId] =
-                        targetChildUserId
+            // ============================================================
+            // CRITICAL SECTION
+            // ============================================================
 
-                    it[VideosTable.fileName] =
-                        file.name
+            synchronized(uploadLock) {
 
-                    it[VideosTable.fileSize] =
-                        file.length()
+                // ========================================================
+                // CHECK COOLDOWN LẠI
+                //
+                // Vì nhiều request có thể đã cùng vượt qua
+                // early check ở phía trên.
+                // ========================================================
 
-                    it[VideosTable.createdAt] =
-                        createdAt
+                val nowInsideLock =
+                    System.currentTimeMillis()
+
+                val lastUploadInsideLock =
+                    lastVideoUploadTime[parentUserId]
+
+                if (
+                    lastUploadInsideLock != null &&
+                    nowInsideLock -
+                    lastUploadInsideLock <
+                    MIN_UPLOAD_INTERVAL_MS
+                ) {
+
+                    val remainingSeconds =
+                        (
+                                MIN_UPLOAD_INTERVAL_MS -
+                                        (
+                                                nowInsideLock -
+                                                        lastUploadInsideLock
+                                                )
+                                ) / 1000L
+
+                    println(
+                        "UPLOAD DENIED INSIDE LOCK: " +
+                                "cooldown active"
+                    )
+
+                    rejectedStatus =
+                        HttpStatusCode.TooManyRequests
+
+                    rejectedMessage =
+                        "Please wait ${remainingSeconds.coerceAtLeast(1)} seconds before uploading another video."
+
+                } else {
+
+                    // ====================================================
+                    // CHECK DAILY LIMIT LẠI
+                    //
+                    // Đây là check bảo vệ concurrent upload.
+                    // ====================================================
+
+                    val dailyUploadCount =
+                        getDailyUploadCount()
+
+                    println(
+                        "DAILY UPLOAD COUNT INSIDE LOCK = " +
+                                "$dailyUploadCount / " +
+                                "$MAX_DAILY_UPLOADS"
+                    )
+
+                    if (
+                        dailyUploadCount >=
+                        MAX_DAILY_UPLOADS
+                    ) {
+
+                        println(
+                            "UPLOAD DENIED INSIDE LOCK: " +
+                                    "daily limit reached"
+                        )
+
+                        rejectedStatus =
+                            HttpStatusCode.TooManyRequests
+
+                        rejectedMessage =
+                            "Daily video upload limit reached. Maximum is 3 videos per day."
+
+                    } else {
+
+                        // =================================================
+                        // FINAL VIDEO DIRECTORY
+                        // =================================================
+
+                        val videoDir =
+                            File("/app/videos")
+
+                        videoDir.mkdirs()
+
+                        val file =
+                            File(
+                                videoDir,
+                                fileName
+                            )
+
+                        // =================================================
+                        // CHECK DUPLICATE FILE NAME
+                        // =================================================
+
+                        val alreadyExists =
+                            transaction {
+
+                                VideosTable
+                                    .selectAll()
+                                    .where {
+                                        VideosTable.fileName eq
+                                                fileName
+                                    }
+                                    .any()
+                            }
+
+                        if (
+                            alreadyExists ||
+                            file.exists()
+                        ) {
+
+                            println(
+                                "VIDEO ALREADY EXISTS: " +
+                                        fileName
+                            )
+
+                            rejectedStatus =
+                                HttpStatusCode.Conflict
+
+                            rejectedMessage =
+                                "Video file already exists: $fileName"
+
+                        } else {
+
+                            // =============================================
+                            // MOVE TEMP -> FINAL
+                            // =============================================
+
+                            if (
+                                !temp.renameTo(file)
+                            ) {
+
+                                throw IllegalStateException(
+                                    "Cannot move temporary video to final location"
+                                )
+                            }
+
+                            savedFile =
+                                file
+
+                            println(
+                                "VIDEO SAVED: " +
+                                        file.absolutePath
+                            )
+
+                            println(
+                                "VIDEO SIZE: " +
+                                        "${file.length()} bytes"
+                            )
+
+                            // =============================================
+                            // SAVE DATABASE
+                            // =============================================
+
+                            val createdAt =
+                                System.currentTimeMillis()
+
+                            transaction {
+
+                                VideosTable.insert {
+
+                                    it[
+                                        VideosTable.childUserId
+                                    ] =
+                                        targetChildUserId
+
+                                    it[
+                                        VideosTable.fileName
+                                    ] =
+                                        file.name
+
+                                    it[
+                                        VideosTable.fileSize
+                                    ] =
+                                        file.length()
+
+                                    it[
+                                        VideosTable.createdAt
+                                    ] =
+                                        createdAt
+                                }
+                            }
+
+                            println(
+                                "VIDEO DATABASE RECORD CREATED"
+                            )
+
+                            println(
+                                "parentUserId = " +
+                                        parentUserId
+                            )
+
+                            println(
+                                "childUserId = " +
+                                        targetChildUserId
+                            )
+
+                            println(
+                                "fileName = " +
+                                        file.name
+                            )
+
+                            // =============================================
+                            // START COOLDOWN
+                            //
+                            // Chỉ ghi cooldown sau khi:
+                            // - file đã lưu
+                            // - DB đã insert thành công
+                            // =============================================
+
+                            lastVideoUploadTime[
+                                parentUserId
+                            ] =
+                                System.currentTimeMillis()
+
+                            println(
+                                "UPLOAD COOLDOWN STARTED: " +
+                                        "30 seconds"
+                            )
+
+                            // =============================================
+                            // CLEANUP
+                            //
+                            // GLOBAL SERVER = 10 VIDEO
+                            // =============================================
+
+                            cleanupOldVideos()
+
+                            uploadSucceeded =
+                                true
+                        }
+                    }
                 }
             }
 
-            println(
-                "VIDEO DATABASE RECORD CREATED"
-            )
-
-            println(
-                "childUserId = $targetChildUserId"
-            )
-
-            println(
-                "fileName = ${file.name}"
-            )
-
             // ============================================================
-            // CLEANUP OLD VIDEOS OF THIS CHILD ONLY
+            // RESPOND SAU KHI THOÁT SYNCHRONIZED
+            //
+            // Đây là điểm sửa lỗi:
+            //
+            // call.respond() là suspend function.
+            // Không được gọi bên trong synchronized.
             // ============================================================
 
-            cleanupOldVideos(
-            )
+            if (
+                rejectedStatus != null
+            ) {
+
+                call.respond(
+                    rejectedStatus!!,
+                    rejectedMessage
+                        ?: "Upload rejected"
+                )
+
+                return@post
+            }
+
+            if (!uploadSucceeded) {
+
+                throw IllegalStateException(
+                    "Upload was not completed"
+                )
+            }
 
             // ============================================================
-            // RESPONSE
+            // SUCCESS RESPONSE
             // ============================================================
+
+            val finalFile =
+                savedFile
+                    ?: throw IllegalStateException(
+                        "Saved file is missing"
+                    )
 
             println(
                 "========== UPLOAD COMPLETE =========="
@@ -677,56 +1187,113 @@ fun Route.viewedItemRoutes(
                 HttpStatusCode.OK,
                 VideoUploadResponse(
                     success = true,
-                    fileName = file.name,
-                    size = file.length(),
+
+                    fileName =
+                        finalFile.name,
+
+                    size =
+                        finalFile.length(),
+
                     videoUrl =
-                        "https://ktorservice.onrender.com/videos/${file.name}"
+                        "https://ktorservice.onrender.com/videos/${finalFile.name}"
                 )
             )
 
-        } catch (e: Exception) {
+        } catch (
+            e: VideoTooLargeException
+    ) {
+
+        println(
+            "========== VIDEO TOO LARGE =========="
+        )
+
+        try {
+            tempFile?.delete()
+        } catch (_: Exception) {
+        }
+
+        try {
+            savedFile?.delete()
+        } catch (_: Exception) {
+        }
+
+        if (
+            !call.response.isCommitted
+        ) {
+
+            call.respond(
+                HttpStatusCode(
+                    413,
+                    "Content Too Large"
+                ),
+                "Video size must not exceed 100 MB"
+            )
+        }
+
+    } catch (e: Exception) {
+
+        println(
+            "========== UPLOAD ERROR =========="
+        )
+
+        println(
+            "Exception: " +
+                    "${e::class.qualifiedName}"
+        )
+
+        println(
+            "Message: " +
+                    e.message
+        )
+
+        e.printStackTrace()
+
+        // ============================================================
+        // CLEANUP FAILED UPLOAD
+        // ============================================================
+
+        try {
+            tempFile?.delete()
+        } catch (_: Exception) {
+        }
+
+        try {
+            savedFile?.delete()
+        } catch (_: Exception) {
+        }
+
+        if (
+            !call.response.isCommitted
+        ) {
+
+            call.respond(
+                HttpStatusCode.InternalServerError,
+                "Upload error: ${e.message}"
+            )
+        }
+
+    } finally {
+
+        // ============================================================
+        // RELEASE GLOBAL UPLOAD SLOT
+        //
+        // Chỉ release nếu request đã acquire slot.
+        //
+        // Các request bị reject ở early check sẽ không release.
+        // ============================================================
+
+        if (uploadPermitAcquired) {
+
+            uploadSemaphore.release()
 
             println(
-                "========== UPLOAD ERROR =========="
+                "Upload slot released"
             )
-
-            println(
-                "Exception: ${e::class.qualifiedName}"
-            )
-
-            println(
-                "Message: ${e.message}"
-            )
-
-            e.printStackTrace()
-
-            // ============================================================
-            // CLEANUP FAILED UPLOAD
-            // ============================================================
-
-            try {
-
-                tempFile?.delete()
-
-            } catch (_: Exception) {
-            }
-
-            try {
-
-                savedFile?.delete()
-
-            } catch (_: Exception) {
-            }
-
-            if (!call.response.isCommitted) {
-
-                call.respond(
-                    HttpStatusCode.InternalServerError,
-                    "Upload error: ${e.message}"
-                )
-            }
         }
     }
+}
+
+
 
     get("/videos") {
 
@@ -757,9 +1324,14 @@ fun Route.viewedItemRoutes(
                 "childUserId = $childUserId"
             )
 
-
             // ============================================================
             // LẤY VIDEO CỦA CHILD
+            //
+            // CHỈ TRẢ VIDEO KHI:
+            //
+            // 1. DB record tồn tại
+            // 2. Physical file tồn tại
+            // 3. Physical file là file thực sự
             // ============================================================
 
             val videos =
@@ -774,33 +1346,92 @@ fun Route.viewedItemRoutes(
                             VideosTable.createdAt to
                                     SortOrder.DESC
                         )
-                        .map { row ->
+                        .mapNotNull { row ->
 
                             val fileName =
                                 row[VideosTable.fileName]
 
+                            val videoDir =
+                                File("/app/videos")
+
                             val file =
                                 File(
-                                    "/app/videos",
+                                    videoDir,
                                     fileName
                                 )
+
+                            // ====================================================
+                            // KIỂM TRA FILE THỰC TẾ
+                            // ====================================================
+
+                            if (
+                                !file.exists() ||
+                                !file.isFile
+                            ) {
+
+                                println(
+                                    "SKIP MISSING VIDEO:"
+                                )
+
+                                println(
+                                    "childUserId = $childUserId"
+                                )
+
+                                println(
+                                    "fileName = $fileName"
+                                )
+
+                                println(
+                                    "path = ${file.absolutePath}"
+                                )
+
+                                return@mapNotNull null
+                            }
+
+                            // ====================================================
+                            // CANONICAL PATH CHECK
+                            // ====================================================
+
+                            val videoDirPath =
+                                videoDir
+                                    .canonicalFile
+                                    .toPath()
+
+                            val filePath =
+                                file
+                                    .canonicalFile
+                                    .toPath()
+
+                            if (
+                                !filePath.startsWith(videoDirPath)
+                            ) {
+
+                                println(
+                                    "SKIP INVALID VIDEO PATH:"
+                                )
+
+                                println(
+                                    "fileName = $fileName"
+                                )
+
+                                return@mapNotNull null
+                            }
+
+                            // ====================================================
+                            // VIDEO HỢP LỆ
+                            // ====================================================
 
                             VideoInfo(
                                 name = fileName,
 
                                 size =
-                                    if (file.exists()) {
-                                        file.length()
-                                    } else {
-                                        row[VideosTable.fileSize]
-                                    },
+                                    file.length(),
 
                                 url =
                                     "https://ktorservice.onrender.com/videos/$fileName"
                             )
                         }
                 }
-
 
             println(
                 "Videos for child $childUserId = ${videos.size}"
@@ -812,7 +1443,6 @@ fun Route.viewedItemRoutes(
                     "VIDEO -> ${video.name}"
                 )
             }
-
 
             call.respond(
                 HttpStatusCode.OK,
@@ -844,6 +1474,7 @@ fun Route.viewedItemRoutes(
             }
         }
     }
+
 
     get("/videos/{fileName}") {
 
@@ -1085,61 +1716,229 @@ fun Route.viewedItemRoutes(
 
     delete("/videos/{fileName}") {
 
-        val fileName =
-            call.parameters["fileName"]
-
-        if (fileName.isNullOrBlank()) {
-
-            call.respond(
-                HttpStatusCode.BadRequest,
-                VideoDeleteResponse(
-                    success = false,
-                    message = "Missing file name"
-                )
-            )
-
-            return@delete
-        }
-
-        val safeName =
-            fileName
-                .substringAfterLast("/")
-                .substringAfterLast("\\")
-
-        val file =
-            File(
-                "/app/videos",
-                safeName
-            )
-
         println(
-            "DELETE VIDEO: ${file.absolutePath}"
+            "========== DELETE /videos/{fileName} =========="
         )
 
-        if (!file.exists()) {
+        try {
+
+            // ============================================================
+            // CHILD ID LẤY TỪ TOKEN
+            // ============================================================
+
+            val childUserId =
+                call.requireUserId(authService)
+
+            if (childUserId == null) {
+
+                call.respond(
+                    HttpStatusCode.Unauthorized,
+                    VideoDeleteResponse(
+                        success = false,
+                        fileName = "",
+                        message = "Invalid or expired token"
+                    )
+                )
+
+                return@delete
+            }
+
+            // ============================================================
+            // FILE NAME
+            // ============================================================
+
+            val fileName =
+                call.parameters["fileName"]
+
+            if (fileName.isNullOrBlank()) {
+
+                call.respond(
+                    HttpStatusCode.BadRequest,
+                    VideoDeleteResponse(
+                        success = false,
+                        fileName = "",
+                        message = "Missing file name"
+                    )
+                )
+
+                return@delete
+            }
+
+            // ============================================================
+            // CHỐNG PATH TRAVERSAL
+            // ============================================================
+
+            val safeName =
+                File(fileName).name
+
+            if (safeName != fileName) {
+
+                call.respond(
+                    HttpStatusCode.Forbidden,
+                    VideoDeleteResponse(
+                        success = false,
+                        fileName = safeName,
+                        message = "Invalid file name"
+                    )
+                )
+
+                return@delete
+            }
 
             println(
-                "VIDEO NOT FOUND: ${file.absolutePath}"
+                "childUserId = $childUserId"
             )
 
-            call.respond(
-                HttpStatusCode.NotFound,
-                VideoDeleteResponse(
-                    success = false,
-                    fileName = safeName,
-                    message = "Video not found"
+            println(
+                "Requested delete = $safeName"
+            )
+
+            // ============================================================
+            // KIỂM TRA VIDEO THUỘC CHILD
+            // ============================================================
+
+            val videoExistsForChild =
+                transaction {
+
+                    VideosTable
+                        .selectAll()
+                        .where {
+
+                            (VideosTable.childUserId eq childUserId) and
+                                    (VideosTable.fileName eq safeName)
+
+                        }
+                        .any()
+                }
+
+            if (!videoExistsForChild) {
+
+                println(
+                    "DELETE DENIED"
                 )
+
+                println(
+                    "childUserId = $childUserId"
+                )
+
+                println(
+                    "fileName = $safeName"
+                )
+
+                call.respond(
+                    HttpStatusCode.NotFound,
+                    VideoDeleteResponse(
+                        success = false,
+                        fileName = safeName,
+                        message = "Video not found"
+                    )
+                )
+
+                return@delete
+            }
+
+            // ============================================================
+            // FILE
+            // ============================================================
+
+            val videoDir =
+                File("/app/videos")
+
+            val file =
+                File(
+                    videoDir,
+                    safeName
+                )
+
+            // ============================================================
+            // CANONICAL PATH CHECK
+            // ============================================================
+
+            val videoDirPath =
+                videoDir
+                    .canonicalFile
+                    .toPath()
+
+            val filePath =
+                file
+                    .canonicalFile
+                    .toPath()
+
+            if (!filePath.startsWith(videoDirPath)) {
+
+                println(
+                    "PATH TRAVERSAL BLOCKED"
+                )
+
+                call.respond(
+                    HttpStatusCode.Forbidden,
+                    VideoDeleteResponse(
+                        success = false,
+                        fileName = safeName,
+                        message = "Access denied"
+                    )
+                )
+
+                return@delete
+            }
+
+            println(
+                "DELETE TARGET = ${file.absolutePath}"
             )
 
-            return@delete
-        }
+            println(
+                "Exists = ${file.exists()}"
+            )
 
-        try {
+            // ============================================================
+            // FILE ĐÃ BỊ XÓA TRƯỚC ĐÓ
+            //
+            // DB RECORD VẪN GIỮ LẠI.
+            //
+            // Không coi đây là lỗi nghiêm trọng.
+            // ============================================================
+
+            if (!file.exists() || !file.isFile) {
+
+                println(
+                    "Physical video already deleted: ${file.name}"
+                )
+
+                call.respond(
+                    HttpStatusCode.OK,
+                    VideoDeleteResponse(
+                        success = true,
+                        fileName = safeName,
+                        message = "Video already deleted"
+                    )
+                )
+
+                return@delete
+            }
+
+            // ============================================================
+            // DELETE PHYSICAL FILE
+            //
+            // KHÔNG DELETE VideosTable
+            //
+            // DB record phải được giữ lại để:
+            //
+            // 1. Tính quota 3 video/ngày
+            // 2. Giữ lịch sử upload
+            // ============================================================
 
             if (file.delete()) {
 
                 println(
-                    "VIDEO DELETED: ${file.name}"
+                    "VIDEO DELETED SUCCESSFULLY"
+                )
+
+                println(
+                    "childUserId = $childUserId"
+                )
+
+                println(
+                    "fileName = ${file.name}"
                 )
 
                 call.respond(
@@ -1169,16 +1968,35 @@ fun Route.viewedItemRoutes(
 
         } catch (e: Exception) {
 
+            println(
+                "========== DELETE VIDEO ERROR =========="
+            )
+
+            println(
+                "Exception = ${e::class.qualifiedName}"
+            )
+
+            println(
+                "Message = ${e.message}"
+            )
+
             e.printStackTrace()
 
-            call.respond(
-                HttpStatusCode.InternalServerError,
-                VideoDeleteResponse(
-                    success = false,
-                    fileName = file.name,
-                    message = e.message ?: "Delete failed"
+            if (!call.response.isCommitted) {
+
+                call.respond(
+                    HttpStatusCode.InternalServerError,
+                    VideoDeleteResponse(
+                        success = false,
+                        fileName =
+                            call.parameters["fileName"]
+                                ?: "",
+                        message =
+                            e.message
+                                ?: "Delete failed"
+                    )
                 )
-            )
+            }
         }
     }
 
@@ -2202,33 +3020,48 @@ fun Route.viewedItemRoutes(
 
 }
 
+private class VideoTooLargeException(
+    message: String
+) : Exception(message)
+
+
 private fun cleanupOldVideos() {
 
-    val videoDir = File("/app/videos")
+    val videoDir =
+        File("/app/videos")
 
     if (!videoDir.exists()) {
         return
     }
 
+    println("========== VIDEO CLEANUP ==========")
+
     val videos =
-        videoDir.listFiles()
+        videoDir
+            .listFiles()
             ?.filter { file ->
                 file.isFile &&
-                        file.extension.equals("mp4", ignoreCase = true)
+                        file.extension.equals(
+                            "mp4",
+                            ignoreCase = true
+                        )
             }
             ?.sortedBy { file ->
                 file.lastModified()
             }
             ?: emptyList()
 
-    println("========== VIDEO CLEANUP ==========")
-    println("Total videos = ${videos.size}")
+    println(
+        "Total physical videos = ${videos.size}"
+    )
 
     if (videos.size <= MAX_VIDEOS) {
 
         println(
             "Video count <= $MAX_VIDEOS, nothing to delete"
         )
+
+        println("===================================")
 
         return
     }
@@ -2248,19 +3081,48 @@ private fun cleanupOldVideos() {
                 "Deleting old video: ${file.name}"
             )
 
-            if (file.delete()) {
+            try {
 
-                println(
-                    "Deleted successfully: ${file.name}"
-                )
+                if (file.delete()) {
 
-            } else {
+                    println(
+                        "Deleted successfully: ${file.name}"
+                    )
+
+                    // ====================================================
+                    // KHÔNG XÓA VideosTable
+                    //
+                    // VideosTable còn được giữ lại để:
+                    //
+                    // 1. Tính quota 3 video/ngày
+                    // 2. Giữ lịch sử upload
+                    //
+                    // File vật lý đã bị cleanup nhưng record DB vẫn tồn tại.
+                    // ====================================================
+
+                } else {
+
+                    println(
+                        "FAILED to delete: ${file.name}"
+                    )
+                }
+
+            } catch (e: Exception) {
 
                 println(
                     "FAILED to delete: ${file.name}"
                 )
+
+                e.printStackTrace()
             }
         }
+
+    println(
+        "Remaining physical videos = " +
+                videos
+                    .drop(deleteCount)
+                    .size
+    )
 
     println("===================================")
 }
