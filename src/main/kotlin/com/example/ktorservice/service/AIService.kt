@@ -170,7 +170,8 @@ class AIService {
         grade: Int,
         subject: String,
         topic: String? = null,
-        difficulty: Difficulty
+        difficulty: Difficulty,
+        previousAssignments: List<String> = emptyList()
     ): GeneratedAssignment {
 
         val sexEducation =
@@ -214,7 +215,8 @@ class AIService {
                 buildSexEducationPrompt(
                     grade = grade,
                     topic = topic,
-                    difficulty = difficulty
+                    difficulty = difficulty,
+                    previousAssignments = previousAssignments
                 )
 
             } else {
@@ -223,7 +225,8 @@ class AIService {
                     grade = grade,
                     subject = subject,
                     topic = topic,
-                    difficulty = difficulty
+                    difficulty = difficulty,
+                    previousAssignments = previousAssignments
                 )
             }
 
@@ -858,7 +861,8 @@ class AIService {
         grade: Int,
         subject: String,
         topic: String?,
-        difficulty: Difficulty
+        difficulty: Difficulty,
+        previousAssignments: List<String> = emptyList()
     ): String {
 
         val topicText =
@@ -906,7 +910,23 @@ class AIService {
                     - Không tạo câu hỏi khó một cách vô lý hoặc đánh đố.
                     """.trimIndent()
             }
+        val previousAssignmentsText =
+            if (previousAssignments.isEmpty()) {
 
+                "Chưa có bài tập nào được giao trước đây."
+
+            } else {
+
+                previousAssignments
+                    .mapIndexed { index, assignment ->
+                        """
+                --- BÀI ĐÃ GIAO ${index + 1} ---
+                $assignment
+                --- KẾT THÚC BÀI ${index + 1} ---
+                """.trimIndent()
+                    }
+                    .joinToString("\n\n")
+            }
         return """
         Bạn là giáo viên Việt Nam có kinh nghiệm.
 
@@ -924,11 +944,67 @@ class AIService {
         ${difficulty.name}
 
         $difficultyText
+Bạn là giáo viên Việt Nam có kinh nghiệm.
 
-        ============================================================
-        YÊU CẦU CHUNG
-        ============================================================
+Hãy tạo MỘT BÀI TẬP gồm đúng 3 CÂU HỎI cho học sinh.
 
+THÔNG TIN:
+
+Lớp: $grade
+Môn: $subject
+
+$topicText
+
+ĐỘ KHÓ ĐƯỢC YÊU CẦU:
+
+${difficulty.name}
+
+$difficultyText
+
+============================================================
+CÁC BÀI ĐÃ GIAO TRƯỚC ĐÂY
+============================================================
+
+$previousAssignmentsText
+
+============================================================
+QUY TẮC KHÔNG TRÙNG BÀI
+============================================================
+
+ĐÂY LÀ YÊU CẦU BẮT BUỘC:
+
+1. Bài tập mới KHÔNG ĐƯỢC trùng với bất kỳ bài nào
+   trong danh sách "CÁC BÀI ĐÃ GIAO TRƯỚC ĐÂY".
+
+2. Không được sao chép lại nguyên văn câu hỏi cũ.
+
+3. Không được chỉ thay đổi số liệu, tên nhân vật hoặc vài từ
+   nhưng vẫn giữ nguyên bản chất câu hỏi cũ.
+
+4. Không được tạo lại cùng một dạng bài với cùng cách hỏi,
+   cùng dữ kiện hoặc cùng tình huống nếu nó đã xuất hiện
+   trong bài cũ.
+
+5. Nếu chủ đề giống nhau, phải tạo câu hỏi mới có nội dung,
+   dữ kiện hoặc tình huống khác rõ ràng.
+
+6. Ưu tiên tạo nội dung chưa từng xuất hiện trong các bài cũ.
+
+7. Hãy kiểm tra toàn bộ bài mới với danh sách bài cũ
+   trước khi trả về kết quả.
+
+8. Nếu phát hiện câu hỏi mới có khả năng trùng hoặc quá giống
+   câu hỏi cũ, hãy tự thay thế câu hỏi đó bằng câu hỏi khác.
+
+9. Không được trả về bài có 1 hoặc nhiều câu hỏi trùng
+   hoặc gần giống đáng kể với bài đã giao.
+
+10. Mục tiêu là bài mới phải thực sự khác với các bài đã giao,
+    không chỉ khác cách diễn đạt.
+
+============================================================
+YÊU CẦU CHUNG
+============================================================
         1. Bài tập gồm đúng 3 câu hỏi.
 
         2. Cả 3 câu thuộc cùng một chủ đề.
@@ -1385,7 +1461,8 @@ class AIService {
     private fun buildSexEducationPrompt(
         grade: Int,
         topic: String?,
-        difficulty: Difficulty
+        difficulty: Difficulty,
+        previousAssignments: List<String> = emptyList()
     ): String {
 
         val scope =
@@ -1407,7 +1484,23 @@ class AIService {
 
                 "Chủ đề được yêu cầu: $topic"
             }
+        val previousAssignmentsText =
+            if (previousAssignments.isEmpty()) {
 
+                "Chưa có bài tập nào được giao trước đây."
+
+            } else {
+
+                previousAssignments
+                    .mapIndexed { index, assignment ->
+                        """
+                --- BÀI ĐÃ GIAO ${index + 1} ---
+                $assignment
+                --- KẾT THÚC BÀI ${index + 1} ---
+                """.trimIndent()
+                    }
+                    .joinToString("\n\n")
+            }
         return """
         Hãy tạo MỘT BÀI TẬP GIÁO DỤC GIỚI TÍNH
         cho học sinh Việt Nam lớp $grade.
@@ -1431,7 +1524,38 @@ class AIService {
         ${difficulty.name}
 
         $difficultyText
+============================================================
+CÁC BÀI ĐÃ GIAO TRƯỚC ĐÂY
+============================================================
 
+$previousAssignmentsText
+
+============================================================
+QUY TẮC KHÔNG TRÙNG BÀI
+============================================================
+
+ĐÂY LÀ YÊU CẦU BẮT BUỘC:
+
+1. Không được tạo lại bất kỳ câu hỏi nào đã xuất hiện
+   trong các bài đã giao trước đây.
+
+2. Không được sao chép nguyên văn.
+
+3. Không được chỉ đổi tên, đổi số liệu hoặc đổi vài từ
+   để tạo cảm giác là câu hỏi mới.
+
+4. Không được tạo câu hỏi có cùng tình huống,
+   cùng dữ kiện và cùng cách giải quyết với bài cũ.
+
+5. Nếu cùng chủ đề, phải tạo nội dung mới rõ ràng.
+
+6. Trước khi trả về JSON, phải tự kiểm tra bài mới
+   với toàn bộ các bài đã giao trước đây.
+
+7. Nếu phát hiện câu nào quá giống bài cũ,
+   hãy tự thay câu đó bằng câu hỏi khác.
+
+8. Bài mới phải thực sự khác các bài đã giao trước đây.
         ============================================================
         MỤC TIÊU GIÁO DỤC
         ============================================================

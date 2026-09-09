@@ -145,5 +145,17 @@ data class CreateChildSessionResponse(
 @Serializable data class AssignedAssignmentResponse( val success: Boolean,
                                                      val assignments: List<UserAssignmentResponse> = emptyList(),
                                                      val message: String? = null )
+@Serializable
+data class TopStudentResponse(
+    val userId: Int,
+    val name: String,
+    val totalScore: Double
+)
 
+@Serializable
+data class TopStudentsResponse(
+    val success: Boolean,
+    val students: List<TopStudentResponse> = emptyList(),
+    val message: String? = null
+)
 

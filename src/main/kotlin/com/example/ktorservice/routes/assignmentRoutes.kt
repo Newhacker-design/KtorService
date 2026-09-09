@@ -8,6 +8,8 @@ import com.example.ktorservice.model.AssignmentQuestion
 import com.example.ktorservice.model.AssignmentStorageData
 import com.example.ktorservice.model.AssignmentStudentData
 import com.example.ktorservice.model.AssignmentSubmitRequest
+import com.example.ktorservice.model.TopStudentResponse
+import com.example.ktorservice.model.TopStudentsResponse
 import com.example.ktorservice.model.UserAssignmentResponse
 import com.example.ktorservice.security.requireUserId
 import com.example.ktorservice.service.AIService
@@ -25,7 +27,101 @@ fun Route.assignmentRoutes(
     assignmentService: AssignmentService,
     parentChildService: ParentChildService
 ) {
+// ============================================================
+// GET /assignments/top-students
+//
+// Trả về TOP 5 CHILD có tổng điểm cao nhất.
+//
+// Tổng điểm = tổng điểm các bài COMPLETED.
+// ============================================================
 
+    get("/assignments/top-students") {
+
+        try {
+
+            val userId =
+                call.requireUserId(authService)
+
+            if (userId == null) {
+
+                call.respond(
+                    HttpStatusCode.Unauthorized,
+                    TopStudentsResponse(
+                        success = false,
+                        message = "Invalid or expired token"
+                    )
+                )
+
+                return@get
+            }
+
+            println(
+                "========== GET TOP 5 STUDENTS =========="
+            )
+
+            println(
+                "REQUEST USER ID = $userId"
+            )
+
+            val topStudents =
+                assignmentService.getTop5Children()
+
+            println(
+                "TOP STUDENTS COUNT = ${topStudents.size}"
+            )
+
+            topStudents.forEachIndexed { index, student ->
+
+                println(
+                    "${index + 1}. " +
+                            "${student.name} - " +
+                            "${student.totalScore}"
+                )
+            }
+
+            call.respond(
+                HttpStatusCode.OK,
+                TopStudentsResponse(
+
+                    success = true,
+
+                    students =
+                        topStudents.map { student ->
+
+                            TopStudentResponse(
+
+                                userId =
+                                    student.userId,
+
+                                name =
+                                    student.name,
+
+                                totalScore =
+                                    student.totalScore
+                            )
+                        }
+                )
+            )
+
+        } catch (e: Exception) {
+
+            println(
+                "========== GET TOP 5 STUDENTS ERROR =========="
+            )
+
+            e.printStackTrace()
+
+            call.respond(
+                HttpStatusCode.InternalServerError,
+                TopStudentsResponse(
+                    success = false,
+                    message =
+                        e.message
+                            ?: "Failed to load top students"
+                )
+            )
+        }
+    }
     // ============================================================
     // GET /assignments/next
     //

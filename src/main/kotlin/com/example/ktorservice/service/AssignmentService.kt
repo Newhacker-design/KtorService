@@ -1,5 +1,6 @@
 package com.example.ktorservice.service
 
+import com.example.ktorservice.database.UsersTable
 import com.example.ktorservice.database.table.AssignmentsTable
 import com.example.ktorservice.database.table.AssignmentsTable.questionMetadata
 import com.example.ktorservice.database.table.UserAssignmentsTable
@@ -24,6 +25,101 @@ class AssignmentService(
     }
     private val assignmentGenerationMutex = Mutex()
     // ============================================================
+    // ============================================================
+// GET TOP 5 CHILDREN
+//
+// Tổng điểm = tổng score của tất cả bài COMPLETED.
+//
+// Chỉ tính các user có role CHILD.
+// Sắp xếp giảm dần.
+// Lấy tối đa 5 child.
+// ============================================================
+
+    data class TopStudentResult(
+        val userId: Int,
+        val name: String,
+        val totalScore: Double
+    )
+
+    suspend fun getTop5Children(): List<TopStudentResult> {
+        return withContext(Dispatchers.IO) {
+            transaction {
+
+                // =====================================================
+                // Lấy các bài đã hoàn thành của CHILD
+                // =====================================================
+
+                val rows =
+                    UserAssignmentsTable
+                        .innerJoin(
+                            UsersTable,
+                            { UserAssignmentsTable.userId },
+                            { UsersTable.id }
+                        )
+                        .select(
+                            UserAssignmentsTable.userId,
+                            UserAssignmentsTable.score
+                        )
+                        .where {
+                            (UserAssignmentsTable.status eq "COMPLETED") and
+                                    (UsersTable.role eq "CHILD")
+                        }
+
+                // =====================================================
+                // Cộng tổng điểm theo từng child
+                // =====================================================
+
+                val scoreMap =
+                    mutableMapOf<Int, Double>()
+
+                rows.forEach { row ->
+
+                    val userId =
+                        row[UserAssignmentsTable.userId]
+
+                    val score =
+                        row[UserAssignmentsTable.score]
+                            ?: 0.0
+
+                    scoreMap[userId] =
+                        (scoreMap[userId] ?: 0.0) + score
+                }
+
+                // =====================================================
+                // Sắp xếp giảm dần và lấy TOP 5
+                // =====================================================
+
+                scoreMap.entries
+                    .sortedByDescending { entry ->
+                        entry.value
+                    }
+                    .take(5)
+                    .mapNotNull { entry ->
+
+                        val userId =
+                            entry.key
+
+                        val user =
+                            UsersTable
+                                .selectAll()
+                                .where {
+                                    UsersTable.id eq userId
+                                }
+                                .firstOrNull()
+
+                        if (user == null) {
+                            null
+                        } else {
+                            TopStudentResult(
+                                userId = userId,
+                                name = user[UsersTable.username],
+                                totalScore = entry.value
+                            )
+                        }
+                    }
+            }
+        }
+    }
 // GET NEXT ASSIGNMENT
 //
 // - Ưu tiên lấy bài đã có trong kho
