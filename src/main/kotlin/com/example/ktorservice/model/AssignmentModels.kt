@@ -6,6 +6,7 @@ import kotlinx.serialization.Serializable
 data class QuestionMetadata(
     val id: Int,
     val question: String = "",
+    val learningObjective: String = "",
     val points: Double = 0.0,
     val answerType: AIService.AnswerType,
     val gradingMethod: AIService.GradingMethod
@@ -113,6 +114,7 @@ data class AssignmentSubmitRequest(
 data class AssignmentQuestion(
     val id: Int,
     val question: String,
+    val learningObjective: String = "",
     val points: Double,
     val answerType: AIService.AnswerType,
     val gradingMethod: AIService.GradingMethod

@@ -63,10 +63,12 @@ class AIService {
     data class GeneratedQuestion(
         val id: Int,
         val question: String,
+        val learningObjective: String,
         val points: Double,
         val answerType: AnswerType,
         val gradingMethod: GradingMethod
     )
+
 
     // ============================================================
     // GENERATED ANSWER
@@ -171,7 +173,8 @@ class AIService {
         subject: String,
         topic: String? = null,
         difficulty: Difficulty,
-        previousAssignments: List<String> = emptyList()
+        previousAssignments: List<String> = emptyList(),
+        qualityFeedback: List<String> = emptyList()
     ): GeneratedAssignment {
 
         val sexEducation =
@@ -216,7 +219,8 @@ class AIService {
                     grade = grade,
                     topic = topic,
                     difficulty = difficulty,
-                    previousAssignments = previousAssignments
+                    previousAssignments = previousAssignments,
+                    qualityFeedback = qualityFeedback
                 )
 
             } else {
@@ -226,7 +230,8 @@ class AIService {
                     subject = subject,
                     topic = topic,
                     difficulty = difficulty,
-                    previousAssignments = previousAssignments
+                    previousAssignments = previousAssignments,
+                    qualityFeedback = qualityFeedback
                 )
             }
 
@@ -258,7 +263,8 @@ class AIService {
 
     private suspend fun callGeminiWithRetry(
         prompt: String,
-        sexEducation: Boolean = false
+        sexEducation: Boolean = false,
+        temperature: Double = 0.7
     ): String {
 
         val key =
@@ -394,7 +400,8 @@ class AIService {
                                 key = key,
                                 prompt = prompt,
                                 sexEducation = sexEducation,
-                                selectedModelOverride = selectedModel
+                                selectedModelOverride = selectedModel,
+                                temperature = temperature
                             )
                         }
 
@@ -564,7 +571,87 @@ class AIService {
             lastError
         )
     }
+    private fun parseQualityReviewResponse(
+        responseText: String
+    ): AssignmentQualityReview {
 
+        val root =
+            json.parseToJsonElement(
+                responseText
+            ).jsonObject
+
+        val candidates =
+            root["candidates"]
+                ?.jsonArray
+                ?: throw IllegalStateException(
+                    "Gemini quality review response has no candidates"
+                )
+
+        val firstCandidate =
+            candidates.firstOrNull()
+                ?.jsonObject
+                ?: throw IllegalStateException(
+                    "Gemini quality review returned no candidate"
+                )
+
+        val content =
+            firstCandidate["content"]
+                ?.jsonObject
+                ?: throw IllegalStateException(
+                    "Gemini quality review response has no content"
+                )
+
+        val parts =
+            content["parts"]
+                ?.jsonArray
+                ?: throw IllegalStateException(
+                    "Gemini quality review response has no parts"
+                )
+
+        val text =
+            parts
+                .firstOrNull()
+                ?.jsonObject
+                ?.get("text")
+                ?.jsonPrimitive
+                ?.content
+                ?: throw IllegalStateException(
+                    "Gemini quality review response has no text"
+                )
+
+        val result =
+            json.parseToJsonElement(
+                text.trim()
+            ).jsonObject
+
+        val pass =
+            result["pass"]
+                ?.jsonPrimitive
+                ?.booleanOrNull
+                ?: throw IllegalStateException(
+                    "Gemini quality review response has no pass"
+                )
+
+        val issues =
+            result["issues"]
+                ?.jsonArray
+                ?.mapNotNull {
+                    it.jsonPrimitive.contentOrNull
+                }
+                ?: emptyList()
+
+        val summary =
+            result["summary"]
+                ?.jsonPrimitive
+                ?.contentOrNull
+                ?: ""
+
+        return AssignmentQualityReview(
+            pass = pass,
+            issues = issues,
+            summary = summary
+        )
+    }
 
     // ============================================================
     // CALL GEMINI
@@ -574,7 +661,8 @@ class AIService {
         key: String,
         prompt: String,
         sexEducation: Boolean = false,
-        selectedModelOverride: String? = null
+        selectedModelOverride: String? = null,
+        temperature: Double = 0.7
     ): String {
 
         val selectedModel =
@@ -749,11 +837,7 @@ class AIService {
 
                             put(
                                 "temperature",
-                                if (sexEducation) {
-                                    0.3
-                                } else {
-                                    0.7
-                                }
+                                temperature
                             )
 
                             put(
@@ -862,17 +946,15 @@ class AIService {
         subject: String,
         topic: String?,
         difficulty: Difficulty,
-        previousAssignments: List<String> = emptyList()
+        previousAssignments: List<String> = emptyList(),
+        qualityFeedback: List<String> = emptyList()
     ): String {
 
         val topicText =
             if (topic.isNullOrBlank()) {
-
-                "Tự chọn nội dung phù hợp với chương trình lớp $grade."
-
+                "Tự xác định một nội dung phù hợp với chương trình lớp $grade của môn $subject."
             } else {
-
-                "Chủ đề yêu cầu: $topic"
+                "Chủ đề trọng tâm: $topic"
             }
 
         val difficultyText =
@@ -880,36 +962,56 @@ class AIService {
 
                 Difficulty.EASY ->
                     """
-                    EASY - DỄ:
-                    - Kiến thức cơ bản phù hợp với lớp $grade.
-                    - Chủ yếu kiểm tra khả năng nhớ và hiểu.
-                    - Số bước giải ít.
-                    - Cách hỏi trực tiếp, rõ ràng.
-                    - Không sử dụng câu hỏi đánh đố.
-                    - Không yêu cầu kiến thức vượt chương trình.
-                    """.trimIndent()
+                EASY - DỄ
+
+                Mục tiêu:
+                - Kiểm tra kiến thức nền tảng mà học sinh lớp $grade cần nắm.
+                - Chủ yếu ở mức nhận biết, thông hiểu và vận dụng trực tiếp.
+                - Câu hỏi rõ ràng, không đánh đố.
+                - Không yêu cầu kiến thức ngoài chương trình.
+
+                Cấu trúc tư duy:
+                - Câu 1: Nhận biết hoặc thông hiểu kiến thức cốt lõi.
+                - Câu 2: Áp dụng trực tiếp kiến thức vừa học.
+                - Câu 3: Vận dụng đơn giản vào một tình huống mới.
+                """.trimIndent()
 
                 Difficulty.MEDIUM ->
                     """
-                    MEDIUM - TRUNG BÌNH:
-                    - Phù hợp chương trình lớp $grade.
-                    - Yêu cầu học sinh vận dụng kiến thức.
-                    - Có thể cần nhiều bước suy luận.
-                    - Có thể kết hợp các kiến thức đã học.
-                    - Mức độ phù hợp với bài luyện tập hoặc kiểm tra thông thường.
-                    """.trimIndent()
+                MEDIUM - TRUNG BÌNH
+
+                Mục tiêu:
+                - Kiểm tra khả năng hiểu và vận dụng kiến thức của học sinh lớp $grade.
+                - Không chỉ yêu cầu học sinh nhớ công thức hoặc quy tắc.
+                - Có thể yêu cầu nhiều bước suy luận.
+                - Có thể kết hợp những kiến thức liên quan đã học.
+                - Không sử dụng kiến thức vượt chương trình.
+
+                Cấu trúc tư duy:
+                - Câu 1: Kiểm tra sự hiểu đúng kiến thức cốt lõi.
+                - Câu 2: Vận dụng kiến thức để giải quyết bài toán hoặc tình huống.
+                - Câu 3: Vận dụng nhiều bước, phân tích hoặc kết hợp kiến thức.
+                """.trimIndent()
 
                 Difficulty.HARD ->
                     """
-                    HARD - KHÓ:
-                    - Phù hợp chương trình lớp $grade nhưng ở mức vận dụng cao.
-                    - Có thể kết hợp nhiều kiến thức.
-                    - Có nhiều bước suy luận hoặc giải quyết vấn đề.
-                    - Có thể sử dụng tình huống biến đổi hoặc nâng cao.
-                    - Không được sử dụng kiến thức vượt quá chương trình lớp $grade.
-                    - Không tạo câu hỏi khó một cách vô lý hoặc đánh đố.
-                    """.trimIndent()
+                HARD - KHÓ
+
+                Mục tiêu:
+                - Kiểm tra khả năng vận dụng cao của học sinh lớp $grade.
+                - Yêu cầu phân tích, suy luận hoặc giải quyết vấn đề.
+                - Có thể kết hợp nhiều kiến thức đã học.
+                - Có thể đưa ra tình huống mới nhưng vẫn phải nằm trong chương trình.
+                - Không được tạo câu hỏi khó bằng cách sử dụng kiến thức vượt chương trình.
+                - Không tạo câu hỏi mẹo hoặc đánh đố vô lý.
+
+                Cấu trúc tư duy:
+                - Câu 1: Vận dụng chắc chắn kiến thức nền tảng.
+                - Câu 2: Giải quyết vấn đề cần nhiều bước suy luận.
+                - Câu 3: Vận dụng cao, phân tích hoặc giải quyết một tình huống mới.
+                """.trimIndent()
             }
+
         val previousAssignmentsText =
             if (previousAssignments.isEmpty()) {
 
@@ -920,185 +1022,337 @@ class AIService {
                 previousAssignments
                     .mapIndexed { index, assignment ->
                         """
-                --- BÀI ĐÃ GIAO ${index + 1} ---
-                $assignment
-                --- KẾT THÚC BÀI ${index + 1} ---
-                """.trimIndent()
+                    --- BÀI ĐÃ GIAO ${index + 1} ---
+                    $assignment
+                    --- KẾT THÚC BÀI ${index + 1} ---
+                    """.trimIndent()
                     }
                     .joinToString("\n\n")
             }
+        val qualityFeedbackText =
+            if (qualityFeedback.isEmpty()) {
+
+                "Không có lỗi từ lần tạo trước."
+
+            } else {
+
+                """
+        BÀI TẠO TRƯỚC ĐÃ BỊ HỆ THỐNG TỪ CHỐI
+
+        Các lỗi đã phát hiện:
+
+        ${
+                    qualityFeedback.mapIndexed { index, error ->
+                        "${index + 1}. $error"
+                    }.joinToString("\n")
+                }
+
+        BẮT BUỘC:
+
+        1. Không lặp lại các lỗi trên.
+
+        2. Kiểm tra kỹ toàn bộ câu hỏi trước khi trả về.
+
+        3. Nếu lỗi liên quan đến từ ngữ, phải viết lại
+           câu hỏi bằng tiếng Việt tự nhiên và chính xác.
+
+        4. Không chỉ thay một từ bị lỗi;
+           phải kiểm tra lại toàn bộ ngữ cảnh của câu hỏi.
+
+        5. Nếu dữ kiện, câu hỏi hoặc đáp án không hợp lý,
+           phải tạo lại câu hỏi hoàn toàn khác.
+        """.trimIndent()
+            }
         return """
-        Bạn là giáo viên Việt Nam có kinh nghiệm.
+        Bạn là một giáo viên Việt Nam có kinh nghiệm xây dựng bài tập
+        theo chương trình giáo dục phổ thông.
 
-        Hãy tạo MỘT BÀI TẬP gồm đúng 3 CÂU HỎI cho học sinh.
+        NHIỆM VỤ
+        ============================================================
 
-        THÔNG TIN:
+        Hãy tạo MỘT BÀI TẬP gồm ĐÚNG 3 CÂU HỎI cho học sinh.
+
+        THÔNG TIN HỌC SINH
+        ============================================================
 
         Lớp: $grade
         Môn: $subject
 
         $topicText
 
-        ĐỘ KHÓ ĐƯỢC YÊU CẦU:
-
-        ${difficulty.name}
+        Độ khó yêu cầu: ${difficulty.name}
 
         $difficultyText
-Bạn là giáo viên Việt Nam có kinh nghiệm.
 
-Hãy tạo MỘT BÀI TẬP gồm đúng 3 CÂU HỎI cho học sinh.
+        ============================================================
+        YÊU CẦU VỀ CHƯƠNG TRÌNH HỌC
+        ============================================================
 
-THÔNG TIN:
+        1. Tất cả nội dung phải phù hợp với chương trình lớp $grade.
 
-Lớp: $grade
-Môn: $subject
+        2. Ưu tiên kiến thức thuộc chủ đề:
+           ${topic ?: "nội dung phù hợp với chương trình lớp $grade"}.
 
-$topicText
+        3. Không sử dụng kiến thức của lớp cao hơn.
 
-ĐỘ KHÓ ĐƯỢC YÊU CẦU:
+        4. Không sử dụng công thức, định lý, thuật ngữ hoặc phương pháp
+           mà học sinh lớp $grade chưa được học.
 
-${difficulty.name}
+        5. Câu hỏi phải kiểm tra kiến thức thực sự thuộc chủ đề,
+           không chỉ chứa từ khóa của chủ đề.
 
-$difficultyText
+        6. Nội dung phải có giá trị học tập, không tạo câu hỏi chỉ
+           để đủ số lượng.
 
-============================================================
-CÁC BÀI ĐÃ GIAO TRƯỚC ĐÂY
-============================================================
+        ============================================================
+        CẤU TRÚC 3 CÂU HỎI
+        ============================================================
 
-$previousAssignmentsText
+        Ba câu hỏi phải tạo thành một bài tập có chiều sâu.
 
-============================================================
-QUY TẮC KHÔNG TRÙNG BÀI
-============================================================
+        Không được tạo 3 câu hỏi chỉ khác nhau về số liệu.
 
-ĐÂY LÀ YÊU CẦU BẮT BUỘC:
+        Câu 1:
+        - Kiểm tra kiến thức hoặc kỹ năng nền tảng.
+        - Giúp xác định học sinh có hiểu kiến thức cốt lõi hay không.
 
-1. Bài tập mới KHÔNG ĐƯỢC trùng với bất kỳ bài nào
-   trong danh sách "CÁC BÀI ĐÃ GIAO TRƯỚC ĐÂY".
+        Câu 2:
+        - Yêu cầu học sinh vận dụng kiến thức.
+        - Có thể đưa vào bài toán có lời văn, tình huống thực tế,
+          phân tích, so sánh hoặc nhiều bước giải nếu phù hợp.
 
-2. Không được sao chép lại nguyên văn câu hỏi cũ.
+        Câu 3:
+        - Phải có mức độ tư duy cao hơn câu 1 và câu 2.
+        - Ưu tiên giải quyết vấn đề, suy luận, phân tích,
+          phát hiện lỗi, tìm cách giải, hoặc vận dụng kiến thức
+          vào một tình huống mới.
+        - Không được làm câu 3 khó một cách vô lý.
 
-3. Không được chỉ thay đổi số liệu, tên nhân vật hoặc vài từ
-   nhưng vẫn giữ nguyên bản chất câu hỏi cũ.
+        LƯU Ý:
 
-4. Không được tạo lại cùng một dạng bài với cùng cách hỏi,
-   cùng dữ kiện hoặc cùng tình huống nếu nó đã xuất hiện
-   trong bài cũ.
+        Câu sau phải có giá trị kiểm tra khác câu trước.
 
-5. Nếu chủ đề giống nhau, phải tạo câu hỏi mới có nội dung,
-   dữ kiện hoặc tình huống khác rõ ràng.
+        Không tạo:
 
-6. Ưu tiên tạo nội dung chưa từng xuất hiện trong các bài cũ.
+        Câu 1: Tính A.
+        Câu 2: Tính B.
+        Câu 3: Tính C.
 
-7. Hãy kiểm tra toàn bộ bài mới với danh sách bài cũ
-   trước khi trả về kết quả.
+        nếu cả ba chỉ kiểm tra cùng một thao tác.
 
-8. Nếu phát hiện câu hỏi mới có khả năng trùng hoặc quá giống
-   câu hỏi cũ, hãy tự thay thế câu hỏi đó bằng câu hỏi khác.
+        ============================================================
+        LEARNING OBJECTIVE
+        ============================================================
 
-9. Không được trả về bài có 1 hoặc nhiều câu hỏi trùng
-   hoặc gần giống đáng kể với bài đã giao.
+        Mỗi câu phải có một "learningObjective" riêng.
 
-10. Mục tiêu là bài mới phải thực sự khác với các bài đã giao,
-    không chỉ khác cách diễn đạt.
+        learningObjective phải cho biết:
+        - kiến thức nào được kiểm tra;
+        - kỹ năng nào học sinh phải sử dụng;
+        - mức độ tư duy của câu hỏi.
 
-============================================================
-YÊU CẦU CHUNG
-============================================================
-        1. Bài tập gồm đúng 3 câu hỏi.
+        Ba learningObjective phải có sự khác biệt.
 
-        2. Cả 3 câu thuộc cùng một chủ đề.
+        ============================================================
+        KHÔNG TRÙNG BÀI
+        ============================================================
 
-        3. Nội dung phù hợp với học sinh lớp $grade.
+        Các bài dưới đây đã được giao cho học sinh:
 
-        4. Tất cả câu hỏi phải tuân thủ độ khó ${difficulty.name}.
+        $previousAssignmentsText
 
-        5. Mỗi câu phải có điểm riêng.
+        YÊU CẦU BẮT BUỘC:
 
-        6. Tổng điểm của 3 câu phải bằng 10.
+        1. Không sao chép câu hỏi cũ.
 
-        7. Có đáp án chính xác cho từng câu.
+        2. Không giữ nguyên câu hỏi rồi chỉ thay đổi vài từ.
 
-        8. Có hướng dẫn chấm điểm.
+        3. Không giữ nguyên dữ kiện rồi chỉ thay đổi số liệu.
 
-        9. Nếu là Toán, đáp án phải có kết quả và cách giải cần thiết.
+        4. Không giữ nguyên tình huống rồi chỉ đổi tên nhân vật.
 
-        10. Nếu là Ngữ văn, chấp nhận các cách diễn đạt tương đương
-            nếu nội dung chính xác.
+        5. Không tạo câu hỏi có cách giải gần như giống hệt câu hỏi cũ
+           nếu không có lý do sư phạm cần thiết.
 
-        11. Nếu là Tiếng Anh, đáp án phải rõ ràng.
+        6. Có thể sử dụng lại cùng kiến thức hoặc dạng bài vì học sinh
+           cần được luyện tập nhiều lần.
 
-        12. Không tạo câu hỏi mơ hồ.
+        7. Tuy nhiên nếu sử dụng lại cùng dạng kiến thức, phải tạo:
+           - dữ kiện mới;
+           - bối cảnh mới;
+           - yêu cầu suy luận mới;
+           hoặc kết hợp các yếu tố trên để bài thực sự khác.
 
-        13. Không thêm câu hỏi thứ 4.
+        8. Ưu tiên những nội dung và tình huống chưa xuất hiện
+           trong các bài trước.
 
-        14. Không gộp nhiều câu hỏi vào cùng một question.
+        9. Trước khi trả về kết quả, hãy tự kiểm tra từng câu hỏi mới
+           với TOÀN BỘ các bài đã giao.
+
+        10. Nếu một câu có khả năng trùng hoặc quá giống bài cũ,
+            hãy tự thay thế câu đó bằng câu hỏi khác.
+
+        ============================================================
+        PHÂN BỔ ĐIỂM
+        ============================================================
+
+        Có đúng 3 câu.
+
+        Tổng điểm phải bằng 10.
+
+        Có thể phân bổ:
+        - 3 + 3 + 4
+        hoặc
+        - 2 + 3 + 5
+
+        Câu có yêu cầu tư duy cao hơn nên có thể có điểm cao hơn.
 
         ============================================================
         ANSWER TYPE
         ============================================================
 
-        Mỗi câu phải chọn MỘT answerType phù hợp nhất.
-
-        Các giá trị hợp lệ:
+        Trong phiên bản hiện tại của hệ thống, CHỈ được sử dụng:
 
         TEXT
-        - Học sinh nhập câu trả lời bằng bàn phím.
-
         HANDWRITING
-        - Học sinh viết tay.
-        - Phù hợp với bài toán, phép tính, lời giải hoặc nội dung
-          mà việc viết tay có ý nghĩa.
-
-        DRAWING
-        - Học sinh cần vẽ hình, biểu đồ, sơ đồ hoặc hình minh họa.
-
         SPEECH_TO_TEXT
-        - Học sinh trả lời bằng lời nói.
-        - Hệ thống sẽ chuyển giọng nói thành văn bản trước khi chấm.
-        - Chỉ sử dụng khi việc trả lời bằng lời nói thực sự phù hợp
-          với câu hỏi.
 
+        KHÔNG ĐƯỢC sử dụng:
+        DRAWING
         MIXED
-        - Chỉ sử dụng khi một câu thực sự yêu cầu nhiều loại
-          input khác nhau.
-        - Không sử dụng MIXED nếu chỉ cần một answerType.
 
-        ============================================================
-        GRADING METHOD
-        ============================================================
+        Lý do:
+        ControlReceiver hiện chưa hỗ trợ hiển thị hình ảnh câu hỏi
+        và chưa có giao diện canvas/hệ thống xử lý bài vẽ tương ứng.
 
-        Chọn gradingMethod phù hợp với answerType.
+        ------------------------------------------------------------
+        TEXT
+        ------------------------------------------------------------
 
-        Quy tắc:
+        Học sinh nhập câu trả lời bằng bàn phím.
 
-        TEXT:
+        Chọn:
         - EXACT nếu đáp án cần khớp chính xác.
         - AI_TEXT nếu cần đánh giá nội dung hoặc cách diễn đạt.
 
-        HANDWRITING:
-        - OCR_AI.
+        ------------------------------------------------------------
+        HANDWRITING
+        ------------------------------------------------------------
 
-        DRAWING:
-        - OPENCV nếu có thể đánh giá bằng hình học/xử lý ảnh.
-        - OPENCV_VISION_AI nếu cần kết hợp phân tích hình ảnh
-          với AI.
+        Học sinh viết câu trả lời bằng tay.
 
-        SPEECH_TO_TEXT:
-        - EXACT nếu câu trả lời sau chuyển giọng nói thành văn bản
-          cần khớp chính xác.
-        - AI_TEXT nếu cần đánh giá nội dung câu trả lời.
+        Phù hợp với:
+        - bài toán;
+        - phép tính;
+        - lời giải;
+        - bài tập cần trình bày các bước;
+        - các nội dung mà viết tay có ý nghĩa.
 
-        MIXED:
-        - Chỉ chọn khi thực sự cần thiết.
-        - Không tự ý dùng một gradingMethod không phù hợp.
+        gradingMethod bắt buộc:
 
-        Không được tạo các giá trị answerType hoặc gradingMethod
+        OCR_AI
+
+        ------------------------------------------------------------
+        SPEECH_TO_TEXT
+        ------------------------------------------------------------
+
+        Chỉ sử dụng khi câu hỏi thực sự phù hợp với việc học sinh
+        trả lời bằng lời nói.
+
+        Ví dụ:
+        - đọc câu;
+        - trả lời câu hỏi bằng lời;
+        - trình bày ý kiến;
+        - luyện nói.
+
+        Chọn:
+        - EXACT nếu cần câu trả lời chính xác.
+        - AI_TEXT nếu cần đánh giá nội dung.
+
+        Không sử dụng SPEECH_TO_TEXT chỉ để làm bài trở nên khác biệt.
+
+        ============================================================
+        TÍNH PHÙ HỢP ANSWER TYPE / GRADING METHOD
+        ============================================================
+
+        Chỉ sử dụng các cặp hợp lệ:
+
+        TEXT + EXACT
+        TEXT + AI_TEXT
+
+        HANDWRITING + OCR_AI
+
+        SPEECH_TO_TEXT + EXACT
+        SPEECH_TO_TEXT + AI_TEXT
+
+        Không tạo bất kỳ answerType hoặc gradingMethod nào
         ngoài danh sách trên.
 
         ============================================================
+        YÊU CẦU RIÊNG THEO MÔN
+        ============================================================
+
+        TOÁN:
+        - Đáp án phải có kết quả chính xác.
+        - Nếu cần giải, answerKey phải chứa các bước giải cần thiết.
+        - Không tạo bài toán thiếu dữ kiện.
+        - Không tạo bài toán có nhiều đáp án đúng nếu đề không nói rõ.
+        - Với câu nhiều bước, đáp án phải thể hiện kết quả và phương pháp.
+
+        NGỮ VĂN:
+        - Đáp án phải nêu được các ý chính cần đạt.
+        - Chấp nhận các cách diễn đạt khác nhau nếu nội dung chính xác.
+        - Không chấm sai chỉ vì học sinh dùng cách diễn đạt khác đáp án mẫu.
+
+        TIẾNG ANH:
+        - Đáp án phải rõ ràng.
+        - Nếu có nhiều đáp án được chấp nhận, phải ghi rõ trong answerKey.
+        - Không tạo câu hỏi có nhiều đáp án đúng nhưng không nói rõ.
+
+        CÁC MÔN KHÁC:
+        - Đáp án phải thể hiện rõ kiến thức hoặc tiêu chí cần đạt.
+        - Không tạo câu hỏi mơ hồ.
+
+        ============================================================
+        CHẤT LƯỢNG CÂU HỎI
+        ============================================================
+
+        Không tạo câu hỏi:
+        - mơ hồ;
+        - thiếu dữ kiện;
+        - có nhiều cách hiểu nhưng không nêu rõ;
+        - không có đáp án xác định;
+        - quá dễ so với difficulty;
+        - quá khó so với chương trình lớp $grade;
+        - chỉ thay đổi số liệu từ câu cũ;
+        - chỉ thay đổi cách diễn đạt từ câu cũ.
+
+        Ưu tiên các câu hỏi yêu cầu học sinh:
+        - giải thích;
+        - so sánh;
+        - suy luận;
+        - tìm nguyên nhân;
+        - phát hiện và sửa lỗi;
+        - áp dụng kiến thức;
+        - giải quyết tình huống;
+        - kết hợp kiến thức đã học;
+
+        nhưng chỉ sử dụng khi phù hợp với môn học và chương trình.
+PHẢN HỒI CHẤT LƯỢNG TỪ LẦN TẠO TRƯỚC
+============================================================
+
+       $qualityFeedbackText
+        ============================================================
         JSON BẮT BUỘC
         ============================================================
+
+        Chỉ trả về JSON hợp lệ.
+
+        Không markdown.
+        Không ```json.
+        Không giải thích bên ngoài JSON.
+
+        Cấu trúc:
 
         {
           "title": "Tên bài",
@@ -1107,6 +1361,7 @@ YÊU CẦU CHUNG
             {
               "id": 1,
               "question": "Nội dung câu hỏi 1",
+              "learningObjective": "Kiến thức, kỹ năng và mức độ tư duy được kiểm tra",
               "points": 3,
               "answerType": "TEXT",
               "gradingMethod": "AI_TEXT"
@@ -1114,6 +1369,7 @@ YÊU CẦU CHUNG
             {
               "id": 2,
               "question": "Nội dung câu hỏi 2",
+              "learningObjective": "Kiến thức, kỹ năng và mức độ tư duy được kiểm tra",
               "points": 3,
               "answerType": "HANDWRITING",
               "gradingMethod": "OCR_AI"
@@ -1121,65 +1377,63 @@ YÊU CẦU CHUNG
             {
               "id": 3,
               "question": "Nội dung câu hỏi 3",
+              "learningObjective": "Kiến thức, kỹ năng và mức độ tư duy được kiểm tra",
               "points": 4,
-              "answerType": "DRAWING",
-              "gradingMethod": "OPENCV_VISION_AI"
+              "answerType": "HANDWRITING",
+              "gradingMethod": "OCR_AI"
             }
           ],
 
           "answerKey": [
             {
               "id": 1,
-              "answer": "Đáp án câu 1"
+              "answer": "Đáp án và các ý cần đạt của câu 1"
             },
             {
               "id": 2,
-              "answer": "Đáp án câu 2"
+              "answer": "Đáp án và các bước giải cần thiết của câu 2"
             },
             {
               "id": 3,
-              "answer": "Đáp án câu 3"
+              "answer": "Đáp án và các bước giải cần thiết của câu 3"
             }
           ],
 
-          "gradingGuide": "Hướng dẫn chấm từng câu",
+          "gradingGuide": "Hướng dẫn chấm điểm cụ thể cho từng câu",
 
           "totalScore": 10
         }
 
         ============================================================
-        QUY TẮC JSON
+        KIỂM TRA TRƯỚC KHI TRẢ JSON
         ============================================================
 
-        - questions phải có đúng 3 phần tử.
+        Trước khi trả kết quả, hãy tự kiểm tra:
 
-        - answerKey phải có đúng 3 phần tử.
+        [ ] Có đúng 3 câu hỏi.
+        [ ] ID là 1, 2, 3.
+        [ ] Có đúng 3 answerKey.
+        [ ] ID answerKey tương ứng với questions.
+        [ ] Tổng điểm bằng 10.
+        [ ] totalScore bằng 10.
+        [ ] Cả 3 câu cùng chủ đề.
+        [ ] Ba câu có learningObjective khác nhau.
+        [ ] Câu 2 sâu hơn câu 1.
+        [ ] Câu 3 sâu hơn câu 2 khi phù hợp với difficulty.
+        [ ] Không có kiến thức vượt chương trình lớp $grade.
+        [ ] Không trùng hoặc quá giống bài cũ.
+        [ ] Không sử dụng DRAWING.
+        [ ] Không sử dụng MIXED.
+        [ ] answerType và gradingMethod tương thích.
+        [ ] Mỗi câu có đáp án.
+        [ ] Có hướng dẫn chấm.
+        [ ] JSON hợp lệ.
+        [ ] Không có nội dung ngoài JSON.
 
-        - id phải tương ứng giữa questions và answerKey.
-
-        - ID phải là 1, 2, 3.
-
-        - Tổng points phải bằng 10.
-
-        - totalScore phải bằng 10.
-
-        - answerType phải là một trong:
-          TEXT, HANDWRITING, DRAWING, SPEECH_TO_TEXT, MIXED.
-
-        - gradingMethod phải là một trong:
-          EXACT, AI_TEXT, OCR_AI, OPENCV, OPENCV_VISION_AI.
-
-        - answerType và gradingMethod phải tương thích.
-
-        - Chỉ trả về JSON hợp lệ.
-
-        - Không markdown.
-
-        - Không ```json.
-
-        - Không giải thích bên ngoài JSON.
-        """.trimIndent()
+        Nếu bất kỳ điều kiện nào không đạt, hãy tự sửa trước khi trả về.
+    """.trimIndent()
     }
+
 
     // ============================================================
     // SEX EDUCATION SYSTEM INSTRUCTION
@@ -1462,7 +1716,8 @@ YÊU CẦU CHUNG
         grade: Int,
         topic: String?,
         difficulty: Difficulty,
-        previousAssignments: List<String> = emptyList()
+        previousAssignments: List<String> = emptyList(),
+        qualityFeedback: List<String> = emptyList()
     ): String {
 
         val scope =
@@ -1500,6 +1755,27 @@ YÊU CẦU CHUNG
                 """.trimIndent()
                     }
                     .joinToString("\n\n")
+            }
+        val qualityFeedbackText =
+            if (qualityFeedback.isEmpty()) {
+
+                "Không có lỗi từ lần tạo trước."
+
+            } else {
+
+                """
+        BÀI TẠO TRƯỚC ĐÃ BỊ TỪ CHỐI.
+
+        Lỗi phát hiện:
+
+        ${
+                    qualityFeedback.mapIndexed { index, error ->
+                        "${index + 1}. $error"
+                    }.joinToString("\n")
+                }
+
+        Hãy tạo lại bài và đảm bảo KHÔNG lặp lại các lỗi trên.
+        """.trimIndent()
             }
         return """
         Hãy tạo MỘT BÀI TẬP GIÁO DỤC GIỚI TÍNH
@@ -1641,7 +1917,10 @@ QUY TẮC KHÔNG TRÙNG BÀI
 
         Không sử dụng EXACT cho câu hỏi mở có nhiều cách
         diễn đạt đúng.
+PHẢN HỒI CHẤT LƯỢNG
+============================================================
 
+    $qualityFeedbackText
         ============================================================
         JSON BẮT BUỘC
         ============================================================
@@ -1839,21 +2118,32 @@ QUY TẮC KHÔNG TRÙNG BÀI
                     )
 
                     GeneratedQuestion(
-
                         id =
                             obj["id"]
                                 ?.jsonPrimitive
                                 ?.int
                                 ?: throw IllegalStateException(
-                                    "Question id missing"
+                                    "Question id is missing"
                                 ),
 
                         question =
                             obj["question"]
                                 ?.jsonPrimitive
                                 ?.content
+                                ?.trim()
+                                ?.takeIf { it.isNotBlank() }
                                 ?: throw IllegalStateException(
-                                    "Question content missing"
+                                    "Question text is missing"
+                                ),
+
+                        learningObjective =
+                            obj["learningObjective"]
+                                ?.jsonPrimitive
+                                ?.content
+                                ?.trim()
+                                ?.takeIf { it.isNotBlank() }
+                                ?: throw IllegalStateException(
+                                    "Question learningObjective is missing"
                                 ),
 
                         points =
@@ -1861,7 +2151,7 @@ QUY TẮC KHÔNG TRÙNG BÀI
                                 ?.jsonPrimitive
                                 ?.doubleOrNull
                                 ?: throw IllegalStateException(
-                                    "Question points missing"
+                                    "Question points are missing"
                                 ),
 
                         answerType =
@@ -2243,7 +2533,12 @@ QUY TẮC KHÔNG TRÙNG BÀI
 
         val totalScore: Double
     )
-
+    @Serializable
+    data class AssignmentQualityReview(
+        val pass: Boolean,
+        val issues: List<String> = emptyList(),
+        val summary: String = ""
+    )
     // ============================================================
     // GRADING RESULT
     // ============================================================
@@ -2261,7 +2556,358 @@ QUY TẮC KHÔNG TRÙNG BÀI
         val feedback: String,
         val questions: List<QuestionGradingResult> = emptyList()
     )
+// ============================================================
+// ASSIGNMENT QUALITY REVIEW
+// ============================================================
 
+    suspend fun reviewGeneratedAssignment(
+        assignment: GeneratedAssignment,
+        grade: Int,
+        subject: String,
+        topic: String?,
+        difficulty: Difficulty
+    ): AssignmentQualityReview {
+
+        val sexEducation =
+            isSexEducation(subject)
+
+        println(
+            "========== AI ASSIGNMENT QUALITY REVIEW =========="
+        )
+
+        println("GRADE = $grade")
+        println("SUBJECT = $subject")
+        println("TOPIC = $topic")
+        println("DIFFICULTY = $difficulty")
+        println("SEX EDUCATION = $sexEducation")
+
+        val prompt =
+            buildQualityReviewPrompt(
+                assignment = assignment,
+                grade = grade,
+                subject = subject,
+                topic = topic,
+                difficulty = difficulty,
+                sexEducation = sexEducation
+            )
+
+        val responseText =
+            withContext(Dispatchers.IO) {
+
+                callGeminiWithRetry(
+                    prompt = prompt,
+                    sexEducation = sexEducation,
+                    temperature = 0.1
+                )
+            }
+
+        val result =
+            parseQualityReviewResponse(
+                responseText
+            )
+
+        println(
+            "QUALITY REVIEW PASS = ${result.pass}"
+        )
+
+        if (result.issues.isNotEmpty()) {
+
+            result.issues.forEach {
+                println("QUALITY ISSUE = $it")
+            }
+        }
+
+        println(
+            "==================================================="
+        )
+
+        return result
+    }
+    private fun buildQualityReviewPrompt(
+        assignment: GeneratedAssignment,
+        grade: Int,
+        subject: String,
+        topic: String?,
+        difficulty: Difficulty,
+        sexEducation: Boolean
+    ): String {
+
+        val questionsText =
+            assignment.questions.joinToString("\n\n") { question ->
+
+                """
+            Câu ${question.id}:
+            ${question.question}
+
+            Điểm: ${question.points}
+            AnswerType: ${question.answerType}
+            GradingMethod: ${question.gradingMethod}
+            """.trimIndent()
+            }
+
+        val answerText =
+            assignment.answerKey.joinToString("\n\n") { answer ->
+
+                """
+            Câu ${answer.id}:
+            ${answer.answer}
+            """.trimIndent()
+            }
+
+        return """
+        Bạn là chuyên gia kiểm định chất lượng bài tập
+        dành cho học sinh Việt Nam.
+
+        Bạn KHÔNG được sửa bài.
+
+        Nhiệm vụ của bạn là kiểm tra bài tập dưới đây
+        và quyết định bài có đủ chất lượng để đưa cho học sinh hay không.
+
+        ============================================================
+        THÔNG TIN
+        ============================================================
+
+        Lớp: $grade
+        Môn: $subject
+        Chủ đề: ${topic ?: "Không xác định"}
+        Độ khó: $difficulty
+
+        ============================================================
+        CÂU HỎI
+        ============================================================
+
+        $questionsText
+
+        ============================================================
+        ĐÁP ÁN
+        ============================================================
+
+        $answerText
+
+        ============================================================
+        HƯỚNG DẪN CHẤM
+        ============================================================
+
+        ${assignment.gradingGuide}
+
+        ============================================================
+        TỔNG ĐIỂM
+        ============================================================
+
+        ${assignment.totalScore}
+
+        ============================================================
+        NHIỆM VỤ KIỂM TRA
+        ============================================================
+
+        Kiểm tra TẤT CẢ các tiêu chí sau.
+
+        ------------------------------------------------------------
+        1. TIẾNG VIỆT
+        ------------------------------------------------------------
+
+        Kiểm tra:
+
+        - chính tả;
+        - từ ngữ;
+        - ngữ pháp;
+        - dấu câu;
+        - cách dùng từ;
+        - câu có tự nhiên với người Việt hay không;
+        - câu có mang nghĩa rõ ràng hay không.
+
+        ĐẶC BIỆT:
+
+        Nếu gặp những cụm từ có vẻ vô nghĩa,
+        sai chính tả hoặc giống lỗi sinh bởi AI,
+        phải đánh FAIL.
+
+        Ví dụ:
+
+        "bà giắt"
+        "bat ngô"
+        "con vật thực hiện phép cộng"
+        "một cây có thể chạy nhanh"
+
+        Không được cố suy diễn để biến câu vô nghĩa
+        thành câu có nghĩa.
+
+        ------------------------------------------------------------
+        2. Ý NGHĨA CÂU HỎI
+        ------------------------------------------------------------
+
+        Mỗi câu phải:
+
+        - có nghĩa;
+        - rõ ràng;
+        - đủ dữ kiện;
+        - học sinh hiểu được cần làm gì;
+        - không mâu thuẫn;
+        - không có thông tin thừa gây hiểu nhầm.
+
+        Nếu chỉ người lớn hoặc AI mới có thể đoán được
+        câu hỏi muốn hỏi gì → FAIL.
+
+        ------------------------------------------------------------
+        3. KIẾN THỨC
+        ------------------------------------------------------------
+
+        Kiểm tra:
+
+        - nội dung có đúng kiến thức không;
+        - có lỗi khoa học không;
+        - có công thức sai không;
+        - có thuật ngữ dùng sai không;
+        - đáp án có thực sự đúng không.
+
+        Nếu đáp án sai → FAIL.
+
+        ------------------------------------------------------------
+        4. ĐỘ TUỔI
+        ------------------------------------------------------------
+
+        Nội dung phải phù hợp học sinh lớp $grade.
+
+        Không được sử dụng kiến thức vượt chương trình
+        nếu không cần thiết.
+
+        ------------------------------------------------------------
+        5. ĐỘ KHÓ
+        ------------------------------------------------------------
+
+        Kiểm tra bài có phù hợp với:
+
+        $difficulty
+
+        hay không.
+
+        Không được đánh giá khó chỉ vì câu hỏi dài hoặc
+        sử dụng từ ngữ phức tạp.
+
+        ------------------------------------------------------------
+        6. CHẤT LƯỢNG 3 CÂU
+        ------------------------------------------------------------
+
+        Ba câu phải có giá trị kiểm tra khác nhau.
+
+        Không chấp nhận:
+
+        Câu 1: tính A
+        Câu 2: tính B
+        Câu 3: tính C
+
+        nếu cả ba chỉ là cùng một thao tác.
+
+        Câu sau nên có chiều sâu hơn câu trước
+        khi phù hợp với môn học và difficulty.
+
+        ------------------------------------------------------------
+        7. ANSWER TYPE
+        ------------------------------------------------------------
+
+        Chỉ chấp nhận:
+
+        TEXT
+        HANDWRITING
+        SPEECH_TO_TEXT
+
+        Không chấp nhận:
+
+        DRAWING
+        MIXED
+
+        Các cặp hợp lệ:
+
+        TEXT + EXACT
+        TEXT + AI_TEXT
+
+        HANDWRITING + OCR_AI
+
+        SPEECH_TO_TEXT + EXACT
+        SPEECH_TO_TEXT + AI_TEXT
+
+        ------------------------------------------------------------
+        8. ĐÁP ÁN
+        ------------------------------------------------------------
+
+        Mỗi câu phải có đáp án.
+
+        Đáp án phải trả lời đúng câu hỏi.
+
+        Không được có trường hợp:
+
+        câu hỏi hỏi A
+        nhưng answerKey trả lời B.
+
+        ------------------------------------------------------------
+        9. HƯỚNG DẪN CHẤM
+        ------------------------------------------------------------
+
+        gradingGuide phải phù hợp với câu hỏi,
+        đáp án và số điểm.
+
+        ------------------------------------------------------------
+        10. TÍNH SƯ PHẠM
+        ------------------------------------------------------------
+
+        Bài phải có giá trị học tập thực sự.
+
+        Không tạo câu hỏi vô nghĩa chỉ để đủ 3 câu.
+
+        ============================================================
+        QUY TẮC PASS / FAIL
+        ============================================================
+
+        PASS chỉ khi:
+
+        - tất cả câu đều có nghĩa;
+        - không có lỗi tiếng Việt nghiêm trọng;
+        - không có từ/cụm từ vô nghĩa;
+        - kiến thức đúng;
+        - đáp án đúng;
+        - đủ dữ kiện;
+        - phù hợp lớp;
+        - phù hợp difficulty;
+        - answerType hợp lệ;
+        - gradingMethod hợp lệ;
+        - ba câu có chất lượng phù hợp;
+        - gradingGuide hợp lý.
+
+        Nếu phát hiện MỘT lỗi nghiêm trọng,
+        phải trả về:
+
+        "pass": false
+
+        Không được bỏ qua lỗi chỉ vì những phần khác của bài tốt.
+
+        ============================================================
+        OUTPUT
+        ============================================================
+
+        Chỉ trả về JSON hợp lệ:
+
+        {
+          "pass": true,
+          "issues": [],
+          "summary": "Bài tập đạt yêu cầu."
+        }
+
+        hoặc:
+
+        {
+          "pass": false,
+          "issues": [
+            "Câu 2 có cách dùng từ không tự nhiên.",
+            "Đáp án câu 3 không phù hợp với câu hỏi."
+          ],
+          "summary": "Bài tập cần được tạo lại."
+        }
+
+        Không markdown.
+        Không ```json.
+        Không giải thích bên ngoài JSON.
+    """.trimIndent()
+    }
     // ============================================================
     // GRADE ASSIGNMENT
     // ============================================================
