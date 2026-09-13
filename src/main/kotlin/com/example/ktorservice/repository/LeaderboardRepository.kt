@@ -1,26 +1,25 @@
 package com.example.ktorservice.repository
 
+import com.example.ktorservice.WeekUtils
 import com.example.ktorservice.model.*
 import org.jetbrains.exposed.sql.transactions.transaction
 import java.time.LocalDate
+import java.time.ZoneId
 
 class LeaderboardRepository {
 
     fun getLeaderboard(
         group: LeaderboardGroup,
-        periodDays: Int = 7,
+        weekOffset: Int = 0,      // 0 = tuần này, -1 = tuần trước
         minCompleted: Int = 1
     ): LeaderboardResponse {
 
-        val sinceMillis =
-            System.currentTimeMillis() -
-                    periodDays.toLong() * 24 * 60 * 60 * 1000
+        // Mốc đầu tuần theo giờ VN, không phải "7 ngày trước"
+        val sinceMillis = WeekUtils.startOfWeekMillis(weekOffset)
 
         val gradeListSql = group.grades.joinToString(",")
 
-        // Tính năm học bắt đầu ở phía Kotlin để nhúng vào SQL
-        // (tránh phụ thuộc CURRENT_DATE của DB — dễ test hơn)
-        val now = LocalDate.now()
+        val now = LocalDate.now(ZoneId.of("Asia/Ho_Chi_Minh"))
         val schoolYearStart =
             if (now.monthValue > 9 ||
                 (now.monthValue == 9 && now.dayOfMonth >= 5)
@@ -28,13 +27,20 @@ class LeaderboardRepository {
             else now.year - 1
 
         /**
-         * grade = schoolYearStart - birth_year - 5
+         * CÁCH B — rank_in_day tính RIÊNG cho mỗi độ khó.
          *
-         * Ví dụ: schoolYearStart = 2025, birthYear = 2013
-         *        grade = 2025 - 2013 - 5 = 7
+         * contribution = score
+         *     × hệ_số_khó              (EASY=0.8, MEDIUM=1.0, HARD=1.5)
+         *     × min(0.8^(lớp_hs − lớp_bài), 1.5)   ← gap lớp vẫn giữ nguyên
+         *     ÷ rank_trong_ngày_theo_độ_khó
          *
-         * Hệ số lớp:
-         *   LEAST(POWER(0.8, grade - a.grade), 1.5)
+         * Ví dụ 1 ngày làm: 3 dễ, 2 TB, 1 khó
+         *   - dễ 1  → rank 1 → không chia
+         *   - dễ 2  → rank 2 → chia 2
+         *   - dễ 3  → rank 3 → chia 3
+         *   - TB 1  → rank 1 → không chia
+         *   - TB 2  → rank 2 → chia 2
+         *   - khó 1 → rank 1 → không chia      ← KHÔNG bị ảnh hưởng bởi 5 bài trước
          */
         val sql = """
             WITH ranked AS (
@@ -45,7 +51,6 @@ class LeaderboardRepository {
                     ua.score,
                     a.difficulty,
                     a.grade AS assignment_grade,
-                    DATE(TO_TIMESTAMP(ua.completed_at / 1000.0)) AS day,
                     ROW_NUMBER() OVER (
                         PARTITION BY
                             ua.user_id,
@@ -113,15 +118,11 @@ class LeaderboardRepository {
         return LeaderboardResponse(
             group = group.name,
             groupLabel = group.label,
-            periodDays = periodDays,
+            weekLabel = WeekUtils.labelCurrentWeek(),
             entries = entries
         )
     }
 
-    /**
-     * Lấy lớp hiện tại của user.
-     * Tính từ birth_year, tự cập nhật mỗi năm.
-     */
     fun getUserGrade(userId: Int): Int? {
         var birthYear: Int? = null
 

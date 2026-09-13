@@ -1,5 +1,6 @@
 package com.example.ktorservice.routes
 
+import com.example.ktorservice.WeekUtils
 import com.example.ktorservice.model.LeaderboardGroup
 import com.example.ktorservice.repository.LeaderboardRepository
 import com.example.ktorservice.security.requireUserId
@@ -17,9 +18,12 @@ fun Route.leaderboardRoutes(
         get {
             val groupKey = call.request.queryParameters["group"]
 
+            val weekOffset = call.request.queryParameters["week"]
+                ?.toIntOrNull() ?: 0
+
             if (groupKey == null) {
                 val all = LeaderboardGroup.entries.associate { g ->
-                    g.name to repo.getLeaderboard(g)
+                    g.name to repo.getLeaderboard(g, weekOffset)
                 }
                 call.respond(all)
                 return@get
@@ -34,33 +38,17 @@ fun Route.leaderboardRoutes(
                 return@get
             }
 
-            val days = call.request.queryParameters["days"]
-                ?.toIntOrNull() ?: 7
-
             val min = call.request.queryParameters["min"]
                 ?.toIntOrNull() ?: 1
 
-            call.respond(repo.getLeaderboard(group, days, min))
-        }
+            val resp = repo.getLeaderboard(group, weekOffset, min)
 
-        get("/my-group") {
-            val userId = call.requireUserId(authService)
-            if (userId == null) {
-                call.respond(HttpStatusCode.Unauthorized)
-                return@get
-            }
-
-            val grade = repo.getUserGrade(userId)
-            if (grade == null) {
-                call.respond(
-                    HttpStatusCode.NotFound,
-                    mapOf("error" to "User has not set birth year")
+            // Bổ sung nhãn tuần để client hiển thị
+            call.respond(
+                resp.copy(
+                    weekLabel = WeekUtils.labelCurrentWeek()
                 )
-                return@get
-            }
-
-            val group = LeaderboardGroup.fromGrade(grade)
-            call.respond(repo.getLeaderboard(group))
+            )
         }
     }
 }

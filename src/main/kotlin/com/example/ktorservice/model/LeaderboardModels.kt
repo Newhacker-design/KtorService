@@ -42,7 +42,7 @@ data class LeaderboardResponse(
     val success: Boolean = true,
     val group: String,
     val groupLabel: String,
-    val periodDays: Int,
+    val weekLabel: String? = null,          // "15/09 - 21/09/2025"
     val entries: List<LeaderboardEntry> = emptyList(),
     val message: String? = null
 )
