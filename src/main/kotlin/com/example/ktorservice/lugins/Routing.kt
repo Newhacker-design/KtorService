@@ -1,13 +1,17 @@
 package com.example.ktorservice.plugins
 
 import com.example.ktorservice.database.dao.ViewedItemDaoImpl
+import com.example.ktorservice.repository.LeaderboardRepository
 import com.example.ktorservice.repository.LocationRepository
+import com.example.ktorservice.repository.StudentGradeRepository
 import com.example.ktorservice.repository.ViewedItemRepository
 import com.example.ktorservice.routes.assignmentRoutes
 import com.example.ktorservice.routes.authRoutes
 import com.example.ktorservice.routes.deviceRoutes
+import com.example.ktorservice.routes.leaderboardRoutes
 import com.example.ktorservice.routes.licenseRoutes
 import com.example.ktorservice.routes.parentRoutes
+import com.example.ktorservice.routes.studentGradeRoutes
 import com.example.ktorservice.routes.viewedItemRoutes
 import com.example.ktorservice.service.AIService
 import com.example.ktorservice.service.AssignmentService
@@ -45,6 +49,9 @@ fun Application.configureRouting() {
         )
     val parentChildService =
         ParentChildService()
+
+    val studentGradeRepo = StudentGradeRepository()
+    val leaderboardRepo = LeaderboardRepository()
     routing {
 
         get("/") {
@@ -87,5 +94,8 @@ fun Application.configureRouting() {
             authService = authService,
             parentChildService = parentChildService
         )
+
+        studentGradeRoutes(authService, studentGradeRepo)
+        leaderboardRoutes(authService, leaderboardRepo)
     }
 }

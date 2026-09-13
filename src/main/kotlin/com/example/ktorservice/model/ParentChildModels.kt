@@ -28,3 +28,15 @@ data class ChildrenResponse(
     val children: List<ChildAccountResponse> = emptyList(),
     val message: String? = null
 )
+@Serializable
+data class VerifyGradeRequest(
+    val birthYear: Int
+)
+
+@Serializable
+data class VerifyGradeResponse(
+    val success: Boolean,
+    val grade: Int? = null,
+    val birthYear: Int? = null,
+    val message: String? = null
+)

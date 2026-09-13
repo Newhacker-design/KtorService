@@ -39,6 +39,8 @@ object UsersTable : Table("users") {
         long(
             "created_at"
         )
+    // THÊM DÒNG NÀY
+    val grade = integer("grade").nullable()
 
     override val primaryKey =
         PrimaryKey(id)
