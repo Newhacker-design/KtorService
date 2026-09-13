@@ -9,13 +9,17 @@ enum class LeaderboardGroup(
 ) {
     GRADE_1_2("Khối 1-2", listOf(1, 2)),
     GRADE_3_4("Khối 3-4", listOf(3, 4)),
-    GRADE_5("Khối 5", listOf(5));
+    GRADE_5_6("Khối 5-6", listOf(5, 6)),
+    GRADE_7_9("Khối 7-9", listOf(7, 8, 9)),
+    GRADE_10_12("Khối 10-12", listOf(10, 11, 12));
 
     companion object {
         fun fromGrade(grade: Int): LeaderboardGroup = when (grade) {
             in 1..2 -> GRADE_1_2
             in 3..4 -> GRADE_3_4
-            else -> GRADE_5
+            in 5..6 -> GRADE_5_6
+            in 7..9 -> GRADE_7_9
+            else -> GRADE_10_12
         }
 
         fun fromKey(key: String): LeaderboardGroup? =
