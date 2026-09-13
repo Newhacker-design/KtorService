@@ -28,15 +28,14 @@ fun Route.studentGradeRoutes(
                 return@get
             }
 
-            val grade = repo.getGrade(userId)
+            val birthYear = repo.getBirthYear(userId)
+            val grade = if (birthYear != null) repo.computeGrade(birthYear) else null
 
-            call.respond(
-                HttpStatusCode.OK,
-                VerifyGradeResponse(
-                    success = true,
-                    grade = grade
-                )
-            )
+            call.respond(HttpStatusCode.OK, VerifyGradeResponse(
+                success = true,
+                grade = grade,
+                birthYear = birthYear
+            ))
         }
 
         /**
@@ -49,45 +48,34 @@ fun Route.studentGradeRoutes(
         post {
             val userId = call.requireUserId(authService)
             if (userId == null) {
-                call.respond(
-                    HttpStatusCode.Unauthorized,
-                    VerifyGradeResponse(
-                        success = false,
-                        message = "Invalid or expired token"
-                    )
-                )
+                call.respond(HttpStatusCode.Unauthorized, VerifyGradeResponse(
+                    success = false,
+                    message = "Invalid or expired token"
+                ))
                 return@post
             }
 
             val request = call.receive<VerifyGradeRequest>()
 
             if (!repo.validateBirthYear(request.birthYear)) {
-                call.respond(
-                    HttpStatusCode.BadRequest,
-                    VerifyGradeResponse(
-                        success = false,
-                        message = "Năm sinh không hợp lệ. Vui lòng kiểm tra lại."
-                    )
-                )
+                call.respond(HttpStatusCode.BadRequest, VerifyGradeResponse(
+                    success = false,
+                    message = "Năm sinh không hợp lệ."
+                ))
                 return@post
             }
 
+            // Lưu năm sinh (không lưu lớp)
+            repo.setBirthYear(userId, request.birthYear)
+
+            // Tính lớp để trả về cho client hiển thị ngay
             val grade = repo.computeGrade(request.birthYear)
-            repo.setGrade(userId, grade)
 
-            println("========== SET STUDENT GRADE ==========")
-            println("USER ID = $userId")
-            println("BIRTH YEAR = ${request.birthYear}")
-            println("COMPUTED GRADE = $grade")
-
-            call.respond(
-                HttpStatusCode.OK,
-                VerifyGradeResponse(
-                    success = true,
-                    grade = grade,
-                    birthYear = request.birthYear
-                )
-            )
+            call.respond(HttpStatusCode.OK, VerifyGradeResponse(
+                success = true,
+                grade = grade,
+                birthYear = request.birthYear
+            ))
         }
     }
 }

@@ -12,8 +12,10 @@ class StudentGradeRepository {
     /**
      * Tính lớp hiện tại từ năm sinh.
      *
-     * Năm học VN bắt đầu 5/9.
-     * Vào lớp 1 lúc 6 tuổi.
+     * Năm học VN bắt đầu 5/9. Vào lớp 1 lúc 6 tuổi.
+     *
+     * Hàm này LUÔN cho ra lớp hiện tại dựa vào ngày hôm nay.
+     * Sang năm sau, gọi lại sẽ tự ra lớp mới.
      */
     fun computeGrade(birthYear: Int): Int {
         val now = LocalDate.now()
@@ -31,16 +33,20 @@ class StudentGradeRepository {
     fun validateBirthYear(birthYear: Int): Boolean {
         val currentYear = LocalDate.now().year
         val age = currentYear - birthYear
-        // Cho phép 5-12 tuổi (tiểu học có biên độ)
         return age in 5..12
     }
 
     /**
-     * Lấy lớp của user.
-     * Trả về null nếu user chưa nhập năm sinh.
+     * Lấy lớp HIỆN TẠI của user, tính từ birth_year.
+     * Tự cập nhật mỗi năm — không cần lưu grade vào DB.
      */
     fun getGrade(userId: Int): Int? {
-        var grade: Int? = null
+        val birthYear = getBirthYear(userId) ?: return null
+        return computeGrade(birthYear)
+    }
+
+    fun getBirthYear(userId: Int): Int? {
+        var birthYear: Int? = null
 
         transaction {
             UsersTable
@@ -48,20 +54,20 @@ class StudentGradeRepository {
                 .where { UsersTable.id eq userId }
                 .limit(1)
                 .forEach { row ->
-                    grade = row[UsersTable.grade]
+                    birthYear = row[UsersTable.birthYear]
                 }
         }
 
-        return grade
+        return birthYear
     }
 
     /**
-     * Lưu lớp của user.
+     * Lưu năm sinh. Không lưu lớp.
      */
-    fun setGrade(userId: Int, grade: Int) {
+    fun setBirthYear(userId: Int, birthYear: Int) {
         transaction {
             UsersTable.update({ UsersTable.id eq userId }) {
-                it[UsersTable.grade] = grade
+                it[UsersTable.birthYear] = birthYear
             }
         }
     }

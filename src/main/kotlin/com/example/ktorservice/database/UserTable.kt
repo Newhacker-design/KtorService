@@ -40,7 +40,7 @@ object UsersTable : Table("users") {
             "created_at"
         )
     // THÊM DÒNG NÀY
-    val grade = integer("grade").nullable()
+    val birthYear = integer("birth_year").nullable()
 
     override val primaryKey =
         PrimaryKey(id)

@@ -2,6 +2,7 @@ package com.example.ktorservice.repository
 
 import com.example.ktorservice.model.*
 import org.jetbrains.exposed.sql.transactions.transaction
+import java.time.LocalDate
 
 class LeaderboardRepository {
 
@@ -17,24 +18,30 @@ class LeaderboardRepository {
 
         val gradeListSql = group.grades.joinToString(",")
 
+        // Tính năm học bắt đầu ở phía Kotlin để nhúng vào SQL
+        // (tránh phụ thuộc CURRENT_DATE của DB — dễ test hơn)
+        val now = LocalDate.now()
+        val schoolYearStart =
+            if (now.monthValue > 9 ||
+                (now.monthValue == 9 && now.dayOfMonth >= 5)
+            ) now.year
+            else now.year - 1
+
         /**
+         * grade = schoolYearStart - birth_year - 5
+         *
+         * Ví dụ: schoolYearStart = 2025, birthYear = 2013
+         *        grade = 2025 - 2013 - 5 = 7
+         *
          * Hệ số lớp:
-         *   LEAST(POWER(0.8, u.grade - a.grade), 1.5)
-         *
-         * Ví dụ:
-         *   u.grade=1, a.grade=1 → 0.8^0  = 1.00
-         *   u.grade=6, a.grade=1 → 0.8^5  = 0.33
-         *   u.grade=1, a.grade=6 → 0.8^-5 = 3.05 → cap về 1.5
-         *
-         * User chưa nhập năm sinh (u.grade IS NULL) → hệ số 1.0
-         * (không bị loại khỏi BXH, chỉ là không được thưởng).
+         *   LEAST(POWER(0.8, grade - a.grade), 1.5)
          */
         val sql = """
             WITH ranked AS (
                 SELECT
                     ua.user_id,
                     u.name,
-                    u.grade,
+                    ($schoolYearStart - u.birth_year - 5) AS current_grade,
                     ua.score,
                     a.difficulty,
                     a.grade AS assignment_grade,
@@ -52,13 +59,13 @@ class LeaderboardRepository {
                 WHERE ua.status = 'COMPLETE'
                   AND ua.completed_at IS NOT NULL
                   AND ua.completed_at >= $sinceMillis
-                  AND u.grade IS NOT NULL
-                  AND u.grade IN ($gradeListSql)
+                  AND u.birth_year IS NOT NULL
+                  AND ($schoolYearStart - u.birth_year - 5) BETWEEN 1 AND 12
             )
             SELECT
                 user_id,
                 name,
-                grade,
+                current_grade AS grade,
                 SUM(
                     score *
                     CASE difficulty
@@ -68,14 +75,15 @@ class LeaderboardRepository {
                         ELSE 1.0
                     END
                     * LEAST(
-                        POWER(0.8, grade - assignment_grade),
+                        POWER(0.8, current_grade - assignment_grade),
                         1.5
                       )
                     / rank_in_day
                 ) AS total_score,
                 COUNT(*) AS completed_count
             FROM ranked
-            GROUP BY user_id, name, grade
+            WHERE current_grade IN ($gradeListSql)
+            GROUP BY user_id, name, current_grade
             HAVING COUNT(*) >= $minCompleted
             ORDER BY total_score DESC
             LIMIT 10
@@ -111,20 +119,33 @@ class LeaderboardRepository {
     }
 
     /**
-     * Lấy lớp của user để route /leaderboard/my-group biết khối nào.
+     * Lấy lớp hiện tại của user.
+     * Tính từ birth_year, tự cập nhật mỗi năm.
      */
     fun getUserGrade(userId: Int): Int? {
-        var grade: Int? = null
+        var birthYear: Int? = null
 
         transaction {
-            exec("SELECT grade FROM users WHERE id = $userId LIMIT 1") { rs ->
+            exec(
+                "SELECT birth_year FROM users WHERE id = $userId LIMIT 1"
+            ) { rs ->
                 if (rs.next()) {
-                    val g = rs.getInt("grade")
-                    grade = if (rs.wasNull()) null else g
+                    val by = rs.getInt("birth_year")
+                    birthYear = if (rs.wasNull()) null else by
                 }
             }
         }
 
-        return grade
+        val by = birthYear ?: return null
+
+        val now = LocalDate.now()
+        val schoolYearStart =
+            if (now.monthValue > 9 ||
+                (now.monthValue == 9 && now.dayOfMonth >= 5)
+            ) now.year
+            else now.year - 1
+
+        val grade = schoolYearStart - by - 5
+        return grade.coerceIn(1, 12)
     }
 }
