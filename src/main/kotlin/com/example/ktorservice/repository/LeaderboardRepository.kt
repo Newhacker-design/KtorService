@@ -61,7 +61,7 @@ class LeaderboardRepository {
                 FROM user_assignments ua
                 JOIN assignments a ON a.id = ua.assignment_id
                 JOIN users u ON u.id = ua.user_id
-                WHERE ua.status = 'COMPLETE'
+                AND ua.status IN ('COMPLETE', 'COMPLETED')
                   AND ua.completed_at IS NOT NULL
                   AND ua.completed_at >= $sinceMillis
                   AND u.birth_year IS NOT NULL
