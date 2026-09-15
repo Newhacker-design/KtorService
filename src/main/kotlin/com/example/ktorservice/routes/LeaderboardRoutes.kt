@@ -15,6 +15,11 @@ fun Route.leaderboardRoutes(
 ) {
     route("/leaderboard") {
 
+        /**
+         * GET /leaderboard?group=GRADE_1_2&week=0&min=1
+         *
+         * Nếu không có group → trả về cả 3 khối.
+         */
         get {
             val groupKey = call.request.queryParameters["group"]
 
@@ -43,7 +48,41 @@ fun Route.leaderboardRoutes(
 
             val resp = repo.getLeaderboard(group, weekOffset, min)
 
-            // Bổ sung nhãn tuần để client hiển thị
+            call.respond(
+                resp.copy(
+                    weekLabel = WeekUtils.labelCurrentWeek()
+                )
+            )
+        }
+
+        /**
+         * GET /leaderboard/my-group
+         *
+         * Tự nhận diện khối của user đang đăng nhập.
+         * Yêu cầu Authorization: Bearer <token>.
+         */
+        get("/my-group") {
+            val userId = call.requireUserId(authService)
+            if (userId == null) {
+                call.respond(
+                    HttpStatusCode.Unauthorized,
+                    mapOf("error" to "Invalid or expired token")
+                )
+                return@get
+            }
+
+            val grade = repo.getUserGrade(userId)
+            if (grade == null) {
+                call.respond(
+                    HttpStatusCode.NotFound,
+                    mapOf("error" to "User has not set birth year")
+                )
+                return@get
+            }
+
+            val group = LeaderboardGroup.fromGrade(grade)
+            val resp = repo.getLeaderboard(group)
+
             call.respond(
                 resp.copy(
                     weekLabel = WeekUtils.labelCurrentWeek()
