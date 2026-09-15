@@ -993,80 +993,62 @@ object AssignmentValidator {
         errors: MutableList<String>
     ) {
 
+        val normalizedObjectives = mutableSetOf<String>()
+
         questions.forEach { question ->
 
-            val objective =
-                tokenizeQuestion(
-                    question.learningObjective
-                )
+            val raw = question.learningObjective.trim()
 
-            val questionWords =
-                tokenizeQuestion(
-                    question.question
-                )
+            // -----------------------------------------------------
+            // 1. Không rỗng, đủ dài (đã có check MIN_OBJECTIVE_LENGTH ở trên)
+            // -----------------------------------------------------
 
-            if (
-                objective.isEmpty() ||
-                questionWords.isEmpty()
-            ) {
-                return@forEach
+            if (raw.isBlank()) return@forEach
+
+            // -----------------------------------------------------
+            // 2. Không được quá chung chung kiểu "hiểu bài"
+            // -----------------------------------------------------
+
+            val lowInfoObjectives = setOf(
+                "hiểu bài",
+                "hiểu",
+                "nắm kiến thức",
+                "nắm bài",
+                "làm được",
+                "biết làm",
+                "ôn tập",
+                "luyện tập"
+            )
+
+            if (raw.lowercase() in lowInfoObjectives) {
+                errors +=
+                    "Question ${question.id} learning objective is too generic"
             }
 
-            /*
-             * Không yêu cầu learningObjective phải chứa từ giống
-             * câu hỏi, vì:
-             *
-             * Question:
-             * "Tại sao cây cần ánh sáng để quang hợp?"
-             *
-             * Objective:
-             * "Hiểu vai trò của ánh sáng trong quá trình quang hợp."
-             *
-             * Hai câu có thể diễn đạt rất khác nhau.
-             *
-             * Chỉ bắt trường hợp objective hoàn toàn vô nghĩa/
-             * không có từ khóa chung trong một số trường hợp.
-             */
+            // -----------------------------------------------------
+            // 3. Phải có ít nhất 1 từ mang nghĩa học thuật
+            //    (độ dài >= 4, không phải common word)
+            // -----------------------------------------------------
 
-            val meaningfulQuestionWords =
-                questionWords.filter {
-                    it.length >= 4 &&
-                            !isCommonWord(it)
-                }.toSet()
+            val meaningfulTokens =
+                tokenizeQuestion(raw)
+                    .filter { it.length >= 4 }
 
-            val meaningfulObjectiveWords =
-                objective.filter {
-                    it.length >= 4 &&
-                            !isCommonWord(it)
-                }.toSet()
+            if (meaningfulTokens.isEmpty()) {
+                errors +=
+                    "Question ${question.id} learning objective does not contain meaningful keywords"
+            }
 
-            if (
-                meaningfulQuestionWords.isNotEmpty() &&
-                meaningfulObjectiveWords.isNotEmpty()
-            ) {
+            // -----------------------------------------------------
+            // 4. Ba objective phải khác nhau
+            // -----------------------------------------------------
 
-                val common =
-                    meaningfulQuestionWords
-                        .intersect(
-                            meaningfulObjectiveWords
-                        )
+            val normalized =
+                raw.lowercase().replace(Regex("\\s+"), " ").trim()
 
-                /*
-                 * Chỉ cảnh báo/reject khi hoàn toàn không có
-                 * bất kỳ keyword chung nào và objective rất dài.
-                 *
-                 * Threshold này cố ý khá nhẹ để tránh false positive.
-                 */
-
-                if (
-                    common.isEmpty() &&
-                    meaningfulQuestionWords.size >= 3 &&
-                    meaningfulObjectiveWords.size >= 4
-                ) {
-
-                    errors +=
-                        "Question ${question.id} learning objective may not match the question"
-                }
+            if (!normalizedObjectives.add(normalized)) {
+                errors +=
+                    "Question ${question.id} learning objective is duplicated with another question"
             }
         }
     }
