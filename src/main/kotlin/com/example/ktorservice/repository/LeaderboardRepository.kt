@@ -2,6 +2,8 @@ package com.example.ktorservice.repository
 
 import com.example.ktorservice.WeekUtils
 import com.example.ktorservice.model.*
+
+import org.jetbrains.exposed.sql.statements.StatementType
 import org.jetbrains.exposed.sql.transactions.transaction
 import java.time.LocalDate
 import java.time.ZoneId
@@ -15,7 +17,6 @@ class LeaderboardRepository {
     ): LeaderboardResponse {
 
         val sinceMillis = WeekUtils.startOfWeekMillis(weekOffset)
-
         val gradeListSql = group.grades.joinToString(",")
 
         val now = LocalDate.now(ZoneId.of("Asia/Ho_Chi_Minh"))
@@ -29,7 +30,7 @@ class LeaderboardRepository {
             appendLine("WITH ranked AS (")
             appendLine("    SELECT")
             appendLine("        ua.user_id,")
-            appendLine("        u.username,")                                    // ĐỔI Ở ĐÂY
+            appendLine("        u.username,")
             appendLine("        ($schoolYearStart - u.birth_year - 5) AS current_grade,")
             appendLine("        ua.score,")
             appendLine("        a.difficulty,")
@@ -52,7 +53,7 @@ class LeaderboardRepository {
             appendLine(")")
             appendLine("SELECT")
             appendLine("    user_id,")
-            appendLine("    username,")                                          // ĐỔI Ở ĐÂY
+            appendLine("    username,")
             appendLine("    current_grade AS grade,")
             appendLine("    SUM(")
             appendLine("        score *")
@@ -68,7 +69,7 @@ class LeaderboardRepository {
             appendLine("    COUNT(*) AS completed_count")
             appendLine("FROM ranked")
             appendLine("WHERE current_grade IN ($gradeListSql)")
-            appendLine("GROUP BY user_id, username, current_grade")               // ĐỔI Ở ĐÂY
+            appendLine("GROUP BY user_id, username, current_grade")
             appendLine("HAVING COUNT(*) >= $minCompleted")
             appendLine("ORDER BY total_score DESC")
             appendLine("LIMIT 10")
@@ -77,7 +78,10 @@ class LeaderboardRepository {
         val entries = mutableListOf<LeaderboardEntry>()
 
         transaction {
-            exec(sql) { rs ->
+            exec(
+                sql,
+                explicitStatementType = StatementType.SELECT
+            ) { rs ->
                 var rank = 0
                 while (rs.next()) {
                     rank++
@@ -85,7 +89,7 @@ class LeaderboardRepository {
                         LeaderboardEntry(
                             rank = rank,
                             userId = rs.getInt("user_id"),
-                            name = rs.getString("username"),                 // ĐỔI Ở ĐÂY
+                            name = rs.getString("username"),
                             grade = rs.getInt("grade"),
                             totalScore = rs.getDouble("total_score"),
                             completedCount = rs.getInt("completed_count")
@@ -108,7 +112,8 @@ class LeaderboardRepository {
 
         transaction {
             exec(
-                "SELECT birth_year FROM users WHERE id = $userId LIMIT 1"
+                "SELECT birth_year FROM users WHERE id = $userId LIMIT 1",
+                explicitStatementType = StatementType.SELECT
             ) { rs ->
                 if (rs.next()) {
                     val by = rs.getInt("birth_year")
