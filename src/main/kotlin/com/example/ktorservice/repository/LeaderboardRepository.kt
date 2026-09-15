@@ -29,7 +29,7 @@ class LeaderboardRepository {
             appendLine("WITH ranked AS (")
             appendLine("    SELECT")
             appendLine("        ua.user_id,")
-            appendLine("        u.name,")
+            appendLine("        u.username,")                                    // ĐỔI Ở ĐÂY
             appendLine("        ($schoolYearStart - u.birth_year - 5) AS current_grade,")
             appendLine("        ua.score,")
             appendLine("        a.difficulty,")
@@ -52,7 +52,7 @@ class LeaderboardRepository {
             appendLine(")")
             appendLine("SELECT")
             appendLine("    user_id,")
-            appendLine("    name,")
+            appendLine("    username,")                                          // ĐỔI Ở ĐÂY
             appendLine("    current_grade AS grade,")
             appendLine("    SUM(")
             appendLine("        score *")
@@ -68,7 +68,7 @@ class LeaderboardRepository {
             appendLine("    COUNT(*) AS completed_count")
             appendLine("FROM ranked")
             appendLine("WHERE current_grade IN ($gradeListSql)")
-            appendLine("GROUP BY user_id, name, current_grade")
+            appendLine("GROUP BY user_id, username, current_grade")               // ĐỔI Ở ĐÂY
             appendLine("HAVING COUNT(*) >= $minCompleted")
             appendLine("ORDER BY total_score DESC")
             appendLine("LIMIT 10")
@@ -85,7 +85,7 @@ class LeaderboardRepository {
                         LeaderboardEntry(
                             rank = rank,
                             userId = rs.getInt("user_id"),
-                            name = rs.getString("name"),
+                            name = rs.getString("username"),                 // ĐỔI Ở ĐÂY
                             grade = rs.getInt("grade"),
                             totalScore = rs.getDouble("total_score"),
                             completedCount = rs.getInt("completed_count")
