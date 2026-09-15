@@ -58,14 +58,14 @@ class LeaderboardRepository {
                             a.difficulty
                         ORDER BY ua.completed_at
                     ) AS rank_in_day
-                FROM user_assignments ua
-                JOIN assignments a ON a.id = ua.assignment_id
-                JOIN users u ON u.id = ua.user_id
-                AND ua.status IN ('COMPLETE', 'COMPLETED')
-                  AND ua.completed_at IS NOT NULL
-                  AND ua.completed_at >= $sinceMillis
-                  AND u.birth_year IS NOT NULL
-                  AND ($schoolYearStart - u.birth_year - 5) BETWEEN 1 AND 12
+                ROM user_assignments ua
+JOIN assignments a ON a.id = ua.assignment_id
+JOIN users u ON u.id = ua.user_id
+WHERE ua.status IN ('COMPLETE', 'COMPLETED')
+  AND ua.completed_at IS NOT NULL
+  AND ua.completed_at >= $sinceMillis
+  AND u.birth_year IS NOT NULL
+  AND ($schoolYearStart - u.birth_year - 5) BETWEEN 1 AND 12
             )
             SELECT
                 user_id,
