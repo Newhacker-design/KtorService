@@ -10,11 +10,10 @@ class LeaderboardRepository {
 
     fun getLeaderboard(
         group: LeaderboardGroup,
-        weekOffset: Int = 0,      // 0 = tuần này, -1 = tuần trước
+        weekOffset: Int = 0,
         minCompleted: Int = 1
     ): LeaderboardResponse {
 
-        // Mốc đầu tuần theo giờ VN, không phải "7 ngày trước"
         val sinceMillis = WeekUtils.startOfWeekMillis(weekOffset)
 
         val gradeListSql = group.grades.joinToString(",")
@@ -26,73 +25,54 @@ class LeaderboardRepository {
             ) now.year
             else now.year - 1
 
-        /**
-         * CÁCH B — rank_in_day tính RIÊNG cho mỗi độ khó.
-         *
-         * contribution = score
-         *     × hệ_số_khó              (EASY=0.8, MEDIUM=1.0, HARD=1.5)
-         *     × min(0.8^(lớp_hs − lớp_bài), 1.5)   ← gap lớp vẫn giữ nguyên
-         *     ÷ rank_trong_ngày_theo_độ_khó
-         *
-         * Ví dụ 1 ngày làm: 3 dễ, 2 TB, 1 khó
-         *   - dễ 1  → rank 1 → không chia
-         *   - dễ 2  → rank 2 → chia 2
-         *   - dễ 3  → rank 3 → chia 3
-         *   - TB 1  → rank 1 → không chia
-         *   - TB 2  → rank 2 → chia 2
-         *   - khó 1 → rank 1 → không chia      ← KHÔNG bị ảnh hưởng bởi 5 bài trước
-         */
-        val sql = """
-            WITH ranked AS (
-                SELECT
-                    ua.user_id,
-                    u.name,
-                    ($schoolYearStart - u.birth_year - 5) AS current_grade,
-                    ua.score,
-                    a.difficulty,
-                    a.grade AS assignment_grade,
-                    ROW_NUMBER() OVER (
-                        PARTITION BY
-                            ua.user_id,
-                            DATE(TO_TIMESTAMP(ua.completed_at / 1000.0)),
-                            a.difficulty
-                        ORDER BY ua.completed_at
-                    ) AS rank_in_day
-                ROM user_assignments ua
-JOIN assignments a ON a.id = ua.assignment_id
-JOIN users u ON u.id = ua.user_id
-WHERE ua.status IN ('COMPLETE', 'COMPLETED')
-  AND ua.completed_at IS NOT NULL
-  AND ua.completed_at >= $sinceMillis
-  AND u.birth_year IS NOT NULL
-  AND ($schoolYearStart - u.birth_year - 5) BETWEEN 1 AND 12
-            )
-            SELECT
-                user_id,
-                name,
-                current_grade AS grade,
-                SUM(
-                    score *
-                    CASE difficulty
-                        WHEN 'EASY'   THEN 0.8
-                        WHEN 'MEDIUM' THEN 1.0
-                        WHEN 'HARD'   THEN 1.5
-                        ELSE 1.0
-                    END
-                    * LEAST(
-                        POWER(0.8, current_grade - assignment_grade),
-                        1.5
-                      )
-                    / rank_in_day
-                ) AS total_score,
-                COUNT(*) AS completed_count
-            FROM ranked
-            WHERE current_grade IN ($gradeListSql)
-            GROUP BY user_id, name, current_grade
-            HAVING COUNT(*) >= $minCompleted
-            ORDER BY total_score DESC
-            LIMIT 10
-        """
+        val sql = buildString {
+            appendLine("WITH ranked AS (")
+            appendLine("    SELECT")
+            appendLine("        ua.user_id,")
+            appendLine("        u.name,")
+            appendLine("        ($schoolYearStart - u.birth_year - 5) AS current_grade,")
+            appendLine("        ua.score,")
+            appendLine("        a.difficulty,")
+            appendLine("        a.grade AS assignment_grade,")
+            appendLine("        ROW_NUMBER() OVER (")
+            appendLine("            PARTITION BY")
+            appendLine("                ua.user_id,")
+            appendLine("                DATE(TO_TIMESTAMP(ua.completed_at / 1000.0)),")
+            appendLine("                a.difficulty")
+            appendLine("            ORDER BY ua.completed_at")
+            appendLine("        ) AS rank_in_day")
+            appendLine("    FROM user_assignments ua")
+            appendLine("    JOIN assignments a ON a.id = ua.assignment_id")
+            appendLine("    JOIN users u ON u.id = ua.user_id")
+            appendLine("    WHERE ua.status IN ('COMPLETE', 'COMPLETED')")
+            appendLine("      AND ua.completed_at IS NOT NULL")
+            appendLine("      AND ua.completed_at >= $sinceMillis")
+            appendLine("      AND u.birth_year IS NOT NULL")
+            appendLine("      AND ($schoolYearStart - u.birth_year - 5) BETWEEN 1 AND 12")
+            appendLine(")")
+            appendLine("SELECT")
+            appendLine("    user_id,")
+            appendLine("    name,")
+            appendLine("    current_grade AS grade,")
+            appendLine("    SUM(")
+            appendLine("        score *")
+            appendLine("        CASE difficulty")
+            appendLine("            WHEN 'EASY'   THEN 0.8")
+            appendLine("            WHEN 'MEDIUM' THEN 1.0")
+            appendLine("            WHEN 'HARD'   THEN 1.5")
+            appendLine("            ELSE 1.0")
+            appendLine("        END")
+            appendLine("        * LEAST(POWER(0.8, current_grade - assignment_grade), 1.5)")
+            appendLine("        / rank_in_day")
+            appendLine("    ) AS total_score,")
+            appendLine("    COUNT(*) AS completed_count")
+            appendLine("FROM ranked")
+            appendLine("WHERE current_grade IN ($gradeListSql)")
+            appendLine("GROUP BY user_id, name, current_grade")
+            appendLine("HAVING COUNT(*) >= $minCompleted")
+            appendLine("ORDER BY total_score DESC")
+            appendLine("LIMIT 10")
+        }
 
         val entries = mutableListOf<LeaderboardEntry>()
 
