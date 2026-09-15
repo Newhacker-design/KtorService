@@ -80,7 +80,8 @@ fun Route.leaderboardRoutes(
                 return@get
             }
 
-            val group = LeaderboardGroup.fromGrade(grade)
+            val group = LeaderboardGroup.ALL
+
             val resp = repo.getLeaderboard(group)
 
             call.respond(

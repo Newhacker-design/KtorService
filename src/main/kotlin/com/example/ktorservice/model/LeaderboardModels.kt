@@ -7,6 +7,9 @@ enum class LeaderboardGroup(
     val label: String,
     val grades: List<Int>
 ) {
+    // THÊM DÒNG NÀY — đặt đầu tiên để dễ nhìn
+    ALL("Toàn trường", (1..12).toList()),
+
     GRADE_1_2("Khối 1-2", listOf(1, 2)),
     GRADE_3_4("Khối 3-4", listOf(3, 4)),
     GRADE_5_6("Khối 5-6", listOf(5, 6)),
@@ -43,7 +46,7 @@ data class LeaderboardResponse(
     val success: Boolean = true,
     val group: String,
     val groupLabel: String,
-    val weekLabel: String? = null,          // "15/09 - 21/09/2025"
+    val weekLabel: String? = null,
     val entries: List<LeaderboardEntry> = emptyList(),
     val message: String? = null
 )
