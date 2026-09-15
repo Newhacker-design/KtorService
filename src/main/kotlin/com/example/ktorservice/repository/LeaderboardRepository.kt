@@ -52,9 +52,9 @@ class LeaderboardRepository {
             appendLine("      AND ($schoolYearStart - u.birth_year - 5) BETWEEN 1 AND 12")
             appendLine(")")
             appendLine("SELECT")
-            appendLine("    user_id,")
-            appendLine("    username,")
-            appendLine("    current_grade AS grade,")
+            appendLine("    ranked.user_id,")
+            appendLine("    ranked.username,")
+            appendLine("    ranked.current_grade AS grade,")
             appendLine("    SUM(")
             appendLine("        score *")
             appendLine("        CASE difficulty")
@@ -66,10 +66,12 @@ class LeaderboardRepository {
             appendLine("        * LEAST(POWER(0.8, current_grade - assignment_grade), 1.5)")
             appendLine("        / rank_in_day")
             appendLine("    ) AS total_score,")
-            appendLine("    COUNT(*) AS completed_count")
+            appendLine("    COUNT(*) AS completed_count,")
+            appendLine("    (av.user_id IS NOT NULL) AS has_avatar")
             appendLine("FROM ranked")
-            appendLine("WHERE current_grade IN ($gradeListSql)")
-            appendLine("GROUP BY user_id, username, current_grade")
+            appendLine("LEFT JOIN user_avatars av ON av.user_id = ranked.user_id")
+            appendLine("WHERE ranked.current_grade IN ($gradeListSql)")
+            appendLine("GROUP BY ranked.user_id, ranked.username, ranked.current_grade, av.user_id")
             appendLine("HAVING COUNT(*) >= $minCompleted")
             appendLine("ORDER BY total_score DESC")
             appendLine("LIMIT 10")
@@ -92,7 +94,8 @@ class LeaderboardRepository {
                             name = rs.getString("username"),
                             grade = rs.getInt("grade"),
                             totalScore = rs.getDouble("total_score"),
-                            completedCount = rs.getInt("completed_count")
+                            completedCount = rs.getInt("completed_count"),
+                            hasAvatar = rs.getBoolean("has_avatar")       // ← THÊM
                         )
                     )
                 }

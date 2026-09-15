@@ -1,12 +1,14 @@
 package com.example.ktorservice.plugins
 
 import com.example.ktorservice.database.dao.ViewedItemDaoImpl
+import com.example.ktorservice.repository.AvatarRepository
 import com.example.ktorservice.repository.LeaderboardRepository
 import com.example.ktorservice.repository.LocationRepository
 import com.example.ktorservice.repository.StudentGradeRepository
 import com.example.ktorservice.repository.ViewedItemRepository
 import com.example.ktorservice.routes.assignmentRoutes
 import com.example.ktorservice.routes.authRoutes
+import com.example.ktorservice.routes.avatarRoutes
 import com.example.ktorservice.routes.deviceRoutes
 import com.example.ktorservice.routes.leaderboardRoutes
 import com.example.ktorservice.routes.licenseRoutes
@@ -52,6 +54,7 @@ fun Application.configureRouting() {
 
     val studentGradeRepo = StudentGradeRepository()
     val leaderboardRepo = LeaderboardRepository()
+    val avatarRepo = AvatarRepository()
     routing {
 
         get("/") {
@@ -97,5 +100,6 @@ fun Application.configureRouting() {
 
         studentGradeRoutes(authService, studentGradeRepo)
         leaderboardRoutes(authService, leaderboardRepo)
+        avatarRoutes(authService, avatarRepo)
     }
 }
