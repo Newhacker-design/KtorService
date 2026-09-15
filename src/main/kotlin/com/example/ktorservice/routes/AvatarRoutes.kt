@@ -1,7 +1,7 @@
 package com.example.ktorservice.routes
 
+import com.example.ktorservice.model.AvatarActionResponse
 import com.example.ktorservice.model.AvatarUploadRequest
-import com.example.ktorservice.model.AvatarUploadResponse
 import com.example.ktorservice.repository.AvatarRepository
 import com.example.ktorservice.security.requireUserId
 import com.example.ktorservice.service.AuthService
@@ -17,16 +17,12 @@ fun Route.avatarRoutes(
 ) {
     route("/users") {
 
-        /**
-         * POST /users/me/avatar
-         * Body: { "imageBase64": "...", "contentType": "image/jpeg" }
-         */
         post("/me/avatar") {
             val userId = call.requireUserId(authService)
             if (userId == null) {
                 call.respond(
                     HttpStatusCode.Unauthorized,
-                    AvatarUploadResponse(success = false, message = "Unauthorized")
+                    AvatarActionResponse(false, "Unauthorized")
                 )
                 return@post
             }
@@ -38,44 +34,46 @@ fun Route.avatarRoutes(
             } catch (e: Exception) {
                 call.respond(
                     HttpStatusCode.BadRequest,
-                    AvatarUploadResponse(success = false, message = "Invalid base64")
+                    AvatarActionResponse(false, "Invalid base64")
                 )
                 return@post
             }
 
-            // Giới hạn 500KB
+            if (bytes.isEmpty()) {
+                call.respond(
+                    HttpStatusCode.BadRequest,
+                    AvatarActionResponse(false, "Empty image")
+                )
+                return@post
+            }
+
             if (bytes.size > 500 * 1024) {
                 call.respond(
                     HttpStatusCode.PayloadTooLarge,
-                    AvatarUploadResponse(success = false, message = "Avatar too large")
+                    AvatarActionResponse(false, "Avatar too large")
                 )
                 return@post
             }
 
             repo.save(userId, bytes, req.contentType)
 
-            call.respond(
-                AvatarUploadResponse(success = true)
-            )
+            println("AVATAR UPLOADED: userId=$userId, size=${bytes.size}")
+
+            call.respond(AvatarActionResponse(true))
         }
 
-        /**
-         * DELETE /users/me/avatar
-         */
         delete("/me/avatar") {
             val userId = call.requireUserId(authService)
             if (userId == null) {
                 call.respond(HttpStatusCode.Unauthorized)
                 return@delete
             }
+
             repo.delete(userId)
-            call.respond(AvatarUploadResponse(success = true))
+            println("AVATAR DELETED: userId=$userId")
+            call.respond(AvatarActionResponse(true))
         }
 
-        /**
-         * GET /users/{id}/avatar
-         * Trả về ảnh binary.
-         */
         get("/{id}/avatar") {
             val id = call.parameters["id"]?.toIntOrNull()
             if (id == null) {

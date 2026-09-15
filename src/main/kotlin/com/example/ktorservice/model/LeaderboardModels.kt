@@ -35,7 +35,7 @@ data class LeaderboardEntry(
     val grade: Int,
     val totalScore: Double,
     val completedCount: Int,
-    val hasAvatar: Boolean = false    // ← THÊM
+    val hasAvatar: Boolean = false
 )
 
 @Serializable

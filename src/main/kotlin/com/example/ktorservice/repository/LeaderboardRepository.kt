@@ -56,15 +56,15 @@ class LeaderboardRepository {
             appendLine("    ranked.username,")
             appendLine("    ranked.current_grade AS grade,")
             appendLine("    SUM(")
-            appendLine("        score *")
-            appendLine("        CASE difficulty")
+            appendLine("        ranked.score *")
+            appendLine("        CASE ranked.difficulty")
             appendLine("            WHEN 'EASY'   THEN 0.8")
             appendLine("            WHEN 'MEDIUM' THEN 1.0")
             appendLine("            WHEN 'HARD'   THEN 1.5")
             appendLine("            ELSE 1.0")
             appendLine("        END")
-            appendLine("        * LEAST(POWER(0.8, current_grade - assignment_grade), 1.5)")
-            appendLine("        / rank_in_day")
+            appendLine("        * LEAST(POWER(0.8, ranked.current_grade - ranked.assignment_grade), 1.5)")
+            appendLine("        / ranked.rank_in_day")
             appendLine("    ) AS total_score,")
             appendLine("    COUNT(*) AS completed_count,")
             appendLine("    (av.user_id IS NOT NULL) AS has_avatar")
@@ -95,7 +95,7 @@ class LeaderboardRepository {
                             grade = rs.getInt("grade"),
                             totalScore = rs.getDouble("total_score"),
                             completedCount = rs.getInt("completed_count"),
-                            hasAvatar = rs.getBoolean("has_avatar")       // ← THÊM
+                            hasAvatar = rs.getBoolean("has_avatar")
                         )
                     )
                 }

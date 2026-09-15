@@ -40,9 +40,6 @@ class AvatarRepository {
         }
     }
 
-    /**
-     * Trả về set userId có avatar — dùng cho leaderboard.
-     */
     fun existsBatch(userIds: List<Int>): Set<Int> {
         if (userIds.isEmpty()) return emptySet()
         return transaction {
