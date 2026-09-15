@@ -13,3 +13,9 @@ data class AvatarUploadResponse(
     val success: Boolean,
     val message: String? = null
 )
+
+@Serializable
+data class AvatarActionResponse(
+    val success: Boolean,
+    val message: String? = null
+)
