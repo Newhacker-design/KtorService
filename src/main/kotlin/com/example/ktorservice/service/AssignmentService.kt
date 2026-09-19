@@ -2,7 +2,6 @@ package com.example.ktorservice.service
 
 import com.example.ktorservice.database.UsersTable
 import com.example.ktorservice.database.table.AssignmentsTable
-import com.example.ktorservice.database.table.AssignmentsTable.questionMetadata
 import com.example.ktorservice.database.table.UserAssignmentsTable
 import com.example.ktorservice.model.QuestionMetadata
 import kotlinx.coroutines.Dispatchers
@@ -28,31 +27,12 @@ class AssignmentService(
     // ============================================================
     // AI CONCURRENCY LIMIT
     // ============================================================
-    //
-    // Cho phép tối đa 2 request AI chạy đồng thời.
-    //
-    // Ví dụ:
-    //
-    // User A -> AI
-    // User B -> AI
-    // User C -> chờ
-    // User D -> chờ
-    //
-    // Semaphore CHỈ bao quanh các request AI.
-    // Không giữ semaphore khi thao tác PostgreSQL.
-    // ============================================================
 
     private val aiSemaphore = Semaphore(2)
 
 
     // ============================================================
     // GET TOP 5 CHILDREN
-    // ============================================================
-    //
-    // Tổng điểm = tổng score của tất cả bài COMPLETED.
-    // Chỉ tính các user có role CHILD.
-    // Sắp xếp giảm dần.
-    // Lấy tối đa 5 child.
     // ============================================================
 
     data class TopStudentResult(
@@ -66,10 +46,6 @@ class AssignmentService(
         return withContext(Dispatchers.IO) {
 
             transaction {
-
-                // =====================================================
-                // Lấy các bài đã hoàn thành của CHILD
-                // =====================================================
 
                 val rows =
                     UserAssignmentsTable
@@ -87,10 +63,6 @@ class AssignmentService(
                                     (UsersTable.role eq "CHILD")
                         }
 
-                // =====================================================
-                // Cộng tổng điểm theo từng child
-                // =====================================================
-
                 val scoreMap =
                     mutableMapOf<Int, Double>()
 
@@ -106,10 +78,6 @@ class AssignmentService(
                     scoreMap[userId] =
                         (scoreMap[userId] ?: 0.0) + score
                 }
-
-                // =====================================================
-                // Sắp xếp giảm dần và lấy TOP 5
-                // =====================================================
 
                 scoreMap.entries
                     .sortedByDescending { entry ->
@@ -146,20 +114,6 @@ class AssignmentService(
 
     // ============================================================
     // GET NEXT ASSIGNMENT
-    // ============================================================
-    //
-    // 1. Ưu tiên lấy bài đã có trong kho.
-    // 2. Không lấy bài đã giao cho user này.
-    // 3. Nếu có bài -> giao ngay.
-    // 4. Nếu kho hết -> AI tạo bài.
-    // 5. Validator kiểm tra cấu trúc.
-    // 6. AI Quality Review kiểm tra chất lượng.
-    // 7. Tối đa 3 lần generate.
-    // 8. Lưu bài vào kho.
-    // 9. Giao bài cho user.
-    //
-    // KHÔNG còn Mutex global.
-    // AI được giới hạn bởi aiSemaphore(2).
     // ============================================================
 
     suspend fun getNextAssignment(
@@ -211,15 +165,6 @@ class AssignmentService(
             )
         }
 
-        // ========================================================
-        // BƯỚC 2
-        //
-        // Không khóa toàn bộ generation nữa.
-        //
-        // Nhiều user có thể cùng đi tới đây.
-        // Semaphore(2) sẽ giới hạn số request AI thực tế.
-        // ========================================================
-
         println(
             "NO AVAILABLE ASSIGNMENT IN STORAGE"
         )
@@ -233,9 +178,8 @@ class AssignmentService(
         )
 
         // ========================================================
-        // BƯỚC 3
+        // BƯỚC 2
         // Generate + Validate + AI Quality Review
-        // Tối đa 3 lần
         // ========================================================
 
         var generated: AIService.GeneratedAssignment? = null
@@ -261,8 +205,6 @@ class AssignmentService(
 
                 // ------------------------------------------------
                 // GENERATE
-                //
-                // Semaphore chỉ giữ trong lúc gọi AI.
                 // ------------------------------------------------
 
                 val candidate =
@@ -279,7 +221,12 @@ class AssignmentService(
                                 subject = subject,
                                 topic = topic,
                                 difficulty = difficulty,
-                                qualityFeedback = lastErrors
+
+                                // AIService v2 nhận String?
+                                qualityFeedback =
+                                    lastErrors
+                                        .joinToString("\n")
+                                        .ifBlank { null }
                             )
 
                         } finally {
@@ -344,10 +291,7 @@ class AssignmentService(
                 )
 
                 // ------------------------------------------------
-                // AI QUALITY / LANGUAGE REVIEW
-                //
-                // Đây cũng là một request AI nên phải qua
-                // Semaphore.
+                // AI QUALITY REVIEW
                 // ------------------------------------------------
 
                 println(
@@ -418,10 +362,6 @@ class AssignmentService(
                     )
                 }
 
-                // ------------------------------------------------
-                // PASS
-                // ------------------------------------------------
-
                 println(
                     "✅ AI QUALITY REVIEW PASSED"
                 )
@@ -450,8 +390,8 @@ class AssignmentService(
         }
 
         // ========================================================
-        // BƯỚC 4
-        // Lấy assignment cuối cùng đã pass.
+        // BƯỚC 3
+        // Lấy assignment cuối cùng đã pass
         // ========================================================
 
         val finalGenerated =
@@ -478,8 +418,6 @@ class AssignmentService(
 
         // ========================================================
         // Tạo QuestionMetadata
-        //
-        // Bao gồm learningObjective.
         // ========================================================
 
         val questionMetadata =
@@ -499,13 +437,6 @@ class AssignmentService(
 
         // ========================================================
         // Tạo answer key
-        //
-        // AIService.GeneratedAnswer:
-        //     id
-        //     answer
-        //
-        // Không cần map sang AssignmentAnswerKey ở đây vì DB
-        // đang lưu answerKey dưới dạng String.
         // ========================================================
 
         val answerKey =
@@ -519,10 +450,8 @@ class AssignmentService(
             finalGenerated.gradingGuide
 
         // ========================================================
-        // BƯỚC 5
+        // BƯỚC 4
         // Lưu assignment vào PostgreSQL
-        //
-        // Không nằm trong Semaphore.
         // ========================================================
 
         val assignment =
@@ -602,8 +531,8 @@ class AssignmentService(
             }
 
         // ========================================================
-        // BƯỚC 6
-        // Giao assignment cho user NGAY
+        // BƯỚC 5
+        // Giao assignment cho user
         // ========================================================
 
         println(
@@ -638,10 +567,6 @@ class AssignmentService(
 
             transaction {
 
-                // ------------------------------------------------
-                // Kiểm tra lần cuối để chống giao trùng
-                // ------------------------------------------------
-
                 val existing =
                     UserAssignmentsTable
                         .selectAll()
@@ -668,10 +593,6 @@ class AssignmentService(
                         assignment
                     )
                 }
-
-                // ------------------------------------------------
-                // Tạo bản ghi mới
-                // ------------------------------------------------
 
                 val statement =
                     UserAssignmentsTable.insert {
@@ -927,10 +848,6 @@ class AssignmentService(
                         .firstOrNull()
                         ?: return@transaction false
 
-                // ------------------------------------------------
-                // Nếu đã hoàn thành thì không chuyển lại
-                // ------------------------------------------------
-
                 if (
                     row[UserAssignmentsTable.status] ==
                     "COMPLETED"
@@ -938,10 +855,6 @@ class AssignmentService(
 
                     return@transaction true
                 }
-
-                // ------------------------------------------------
-                // Chuyển sang IN_PROGRESS
-                // ------------------------------------------------
 
                 UserAssignmentsTable.update(
                     where = {
@@ -992,10 +905,6 @@ class AssignmentService(
             )
                 ?: return null
 
-        // --------------------------------------------------------
-        // Nếu đã COMPLETED thì trả kết quả cũ
-        // --------------------------------------------------------
-
         if (userAssignment.status == "COMPLETED") {
             return userAssignment
         }
@@ -1016,15 +925,14 @@ class AssignmentService(
             "ASSIGNMENT ID = ${userAssignment.assignmentId}"
         )
 
-        // --------------------------------------------------------
-        // Gọi Gemini để chấm
-        //
-        // Đây cũng là AI request -> Semaphore(2)
-        // --------------------------------------------------------
+        // ========================================================
+        // Chuẩn bị GeneratedAssignment cho AIService v2
+        // ========================================================
 
-        println(
-            "GRADING ASSIGNMENT WITH AI..."
-        )
+        val assignmentForGrading =
+            buildGeneratedAssignmentForGrading(
+                assignment = userAssignment.assignment
+            )
 
         println(
             "========== ASSIGNMENT DATA FOR GRADING =========="
@@ -1082,6 +990,14 @@ class AssignmentService(
             "================================================="
         )
 
+        // ========================================================
+        // Gọi Gemini để chấm
+        // ========================================================
+
+        println(
+            "GRADING ASSIGNMENT WITH AI..."
+        )
+
         println(
             "WAITING FOR AI GRADING SLOT..."
         )
@@ -1096,7 +1012,7 @@ class AssignmentService(
                 try {
 
                     aiService.gradeAssignment(
-                        assignment = userAssignment.assignment,
+                        assignment = assignmentForGrading,
                         studentAnswer = answer
                     )
 
@@ -1112,9 +1028,9 @@ class AssignmentService(
             "AI GRADE = ${grading.score}"
         )
 
-        // --------------------------------------------------------
+        // ========================================================
         // Lưu kết quả
-        // --------------------------------------------------------
+        // ========================================================
 
         withContext(Dispatchers.IO) {
 
@@ -1154,6 +1070,158 @@ class AssignmentService(
             userId = userId,
             userAssignmentId = userAssignmentId
         )
+    }
+
+
+    // ============================================================
+    // BUILD GENERATED ASSIGNMENT FOR GRADING
+    // ============================================================
+    //
+    // AssignmentResult là model lưu trong database.
+    //
+    // AIService v2 gradeAssignment() nhận:
+    //
+    //     AIService.GeneratedAssignment
+    //
+    // Vì vậy cần chuyển dữ liệu PostgreSQL về model AI.
+    //
+    // Không thay đổi database schema.
+    // Không thay đổi public API của AssignmentService.
+    // ============================================================
+
+    private fun buildGeneratedAssignmentForGrading(
+        assignment: AssignmentResult
+    ): AIService.GeneratedAssignment {
+
+        val questions =
+            assignment.questionMetadata.map { metadata ->
+
+                AIService.GeneratedQuestion(
+                    id = metadata.id,
+                    question = metadata.question,
+                    learningObjective = metadata.learningObjective,
+                    points = metadata.points,
+                    answerType = metadata.answerType,
+                    gradingMethod = metadata.gradingMethod
+                )
+            }
+
+        val answerKey =
+            parseStoredAnswerKey(
+                answerKey = assignment.answerKey
+            )
+
+        return AIService.GeneratedAssignment(
+            title = assignment.title,
+            questions = questions,
+            answerKey = answerKey,
+            gradingGuide = assignment.gradingGuide,
+            totalScore = assignment.totalScore
+        )
+    }
+
+
+    // ============================================================
+    // PARSE STORED ANSWER KEY
+    // ============================================================
+    //
+    // Database đang lưu:
+    //
+    // Câu 1:
+    // ...
+    //
+    // Câu 2:
+    // ...
+    //
+    // Câu 3:
+    // ...
+    //
+    // Chuyển lại thành:
+    //
+    // List<AIService.GeneratedAnswer>
+    // ============================================================
+
+    private fun parseStoredAnswerKey(
+        answerKey: String
+    ): List<AIService.GeneratedAnswer> {
+
+        if (answerKey.isBlank()) {
+            return emptyList()
+        }
+
+        val result =
+            mutableListOf<AIService.GeneratedAnswer>()
+
+        val sections =
+            Regex(
+                pattern = "(?m)(?=^Câu\\s+\\d+\\s*:)"
+            )
+                .split(answerKey)
+                .map {
+                    it.trim()
+                }
+                .filter {
+                    it.isNotBlank()
+                }
+
+        sections.forEach { section ->
+
+            val match =
+                Regex(
+                    pattern = "^Câu\\s+(\\d+)\\s*:\\s*(.*)$",
+                    options = setOf(
+                        RegexOption.MULTILINE,
+                        RegexOption.DOT_MATCHES_ALL
+                    )
+                ).find(section)
+
+            if (match != null) {
+
+                val id =
+                    match.groupValues[1].toIntOrNull()
+
+                val answer =
+                    match.groupValues[2].trim()
+
+                if (
+                    id != null &&
+                    answer.isNotBlank()
+                ) {
+
+                    result +=
+                        AIService.GeneratedAnswer(
+                            id = id,
+                            answer = answer
+                        )
+                }
+            }
+        }
+
+        // --------------------------------------------------------
+        // Fallback
+        //
+        // Nếu format cũ không parse được, vẫn tạo answer key
+        // theo từng dòng/phần để tránh làm crash toàn bộ.
+        // --------------------------------------------------------
+
+        if (result.isEmpty()) {
+
+            println(
+                "⚠️ STORED ANSWER KEY COULD NOT BE PARSED"
+            )
+
+            println(
+                "Answer key will be passed as a single answer entry."
+            )
+
+            result +=
+                AIService.GeneratedAnswer(
+                    id = 1,
+                    answer = answerKey.trim()
+                )
+        }
+
+        return result
     }
 
 
@@ -1295,10 +1363,6 @@ class AssignmentService(
         row: ResultRow
     ): AssignmentResult {
 
-        // --------------------------------------------------------
-        // Question metadata
-        // --------------------------------------------------------
-
         val questionMetadata =
             row[AssignmentsTable.questionMetadata]
                 ?.let { jsonString ->
@@ -1320,10 +1384,6 @@ class AssignmentService(
                     }
                 }
                 ?: emptyList()
-
-        // --------------------------------------------------------
-        // Difficulty
-        // --------------------------------------------------------
 
         val difficulty =
             row[AssignmentsTable.difficulty]
