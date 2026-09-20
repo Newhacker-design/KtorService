@@ -1190,10 +1190,24 @@ class AssignmentService(
                 "SCORE = ${grading.score}"
             )
 
+            val scorePercent =
+                if (userAssignment.assignment.totalScore > 0.0) {
+                    (
+                            grading.score /
+                                    userAssignment.assignment.totalScore *
+                                    100.0
+                            ).coerceIn(0.0, 100.0)
+                } else {
+                    0.0
+                }
+
+            println("ASSIGNMENT SCORE = ${grading.score}/${userAssignment.assignment.totalScore}")
+            println("LEARNING PATH SCORE PERCENT = $scorePercent")
+
             learningPathService.updateProgress(
                 userId = userId,
                 stepId = learningStepId,
-                score = grading.score
+                score = scorePercent
             )
 
             println(
