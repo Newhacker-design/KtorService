@@ -16,9 +16,9 @@ import org.jetbrains.exposed.sql.transactions.transaction
 
 
 class AssignmentService(
-    private val aiService: AIService
+    private val aiService: AIService,
+    private val learningPathService: LearningPathService
 ) {
-
     private val json = Json {
         ignoreUnknownKeys = true
         isLenient = true
@@ -131,7 +131,24 @@ class AssignmentService(
         require(subject.isNotBlank()) {
             "Subject is required"
         }
+        val nextLearningStep =
+            learningPathService.getNextStep(
+                userId = userId,
+                grade = grade,
+                subject = subject
+            )
 
+        if (nextLearningStep != null) {
+            println("========== LEARNING PATH ==========")
+            println("LEARNING STEP ID = ${nextLearningStep.first.id}")
+            println("STEP ORDER = ${nextLearningStep.first.stepOrder}")
+            println("STEP TITLE = ${nextLearningStep.first.title}")
+            println("STEP SKILL = ${nextLearningStep.first.skill}")
+            println("STEP STATUS = ${nextLearningStep.second.status}")
+            println("MASTERY SCORE = ${nextLearningStep.second.masteryScore}")
+            println("ATTEMPT COUNT = ${nextLearningStep.second.attemptCount}")
+            println("===================================")
+        }
         println("========== GET NEXT ASSIGNMENT ==========")
         println("USER ID = $userId")
         println("GRADE = $grade")
@@ -145,13 +162,30 @@ class AssignmentService(
         // ========================================================
 
         val existingAssignment =
-            findNextAvailableAssignment(
-                userId = userId,
-                grade = grade,
-                subject = subject,
-                topic = topic,
-                difficulty = difficulty
-            )
+            if (nextLearningStep == null) {
+
+                findNextAvailableAssignment(
+                    userId = userId,
+                    grade = grade,
+                    subject = subject,
+                    topic = topic,
+                    difficulty = difficulty
+                )
+
+            } else {
+
+                // Assignment trong storage hiện tại chưa biết
+                // thuộc LearningStep nào.
+                //
+                // Không lấy assignment cũ để tránh gán nhầm
+                // nội dung của step khác vào step hiện tại.
+
+                println(
+                    "LEARNING PATH ACTIVE -> SKIP GENERIC ASSIGNMENT STORAGE"
+                )
+
+                null
+            }
 
         if (existingAssignment != null) {
 
@@ -161,7 +195,8 @@ class AssignmentService(
 
             return createUserAssignmentImmediately(
                 userId = userId,
-                assignment = existingAssignment
+                assignment = existingAssignment,
+                learningStepId = null
             )
         }
 
@@ -222,11 +257,19 @@ class AssignmentService(
                                 topic = topic,
                                 difficulty = difficulty,
 
-                                // AIService v2 nhận String?
                                 qualityFeedback =
                                     lastErrors
                                         .joinToString("\n")
-                                        .ifBlank { null }
+                                        .ifBlank { null },
+
+                                learningStepTitle =
+                                    nextLearningStep?.first?.title,
+
+                                learningStepSkill =
+                                    nextLearningStep?.first?.skill,
+
+                                learningStepDescription =
+                                    nextLearningStep?.first?.description
                             )
 
                         } finally {
@@ -313,7 +356,16 @@ class AssignmentService(
                                 grade = grade,
                                 subject = subject,
                                 topic = topic,
-                                difficulty = difficulty
+                                difficulty = difficulty,
+
+                                learningStepTitle =
+                                    nextLearningStep?.first?.title,
+
+                                learningStepSkill =
+                                    nextLearningStep?.first?.skill,
+
+                                learningStepDescription =
+                                    nextLearningStep?.first?.description
                             )
 
                         } finally {
@@ -549,7 +601,8 @@ class AssignmentService(
 
         return createUserAssignmentImmediately(
             userId = userId,
-            assignment = assignment
+            assignment = assignment,
+            learningStepId = nextLearningStep?.first?.id
         )
     }
 
@@ -560,7 +613,8 @@ class AssignmentService(
 
     private suspend fun createUserAssignmentImmediately(
         userId: Int,
-        assignment: AssignmentResult
+        assignment: AssignmentResult,
+        learningStepId: Int? = null
     ): UserAssignmentResult {
 
         return withContext(Dispatchers.IO) {
@@ -593,7 +647,6 @@ class AssignmentService(
                         assignment
                     )
                 }
-
                 val statement =
                     UserAssignmentsTable.insert {
 
@@ -605,6 +658,9 @@ class AssignmentService(
 
                         it[UserAssignmentsTable.status] =
                             "NEW"
+
+                        it[UserAssignmentsTable.learningStepId] =
+                            learningStepId
                     }
 
                 val userAssignmentId =
@@ -1066,6 +1122,41 @@ class AssignmentService(
             }
         }
 
+// ========================================================
+// UPDATE LEARNING PATH PROGRESS
+// ========================================================
+
+        val learningStepId =
+            userAssignment.learningStepId
+
+        if (learningStepId != null) {
+
+            println(
+                "========== UPDATE LEARNING PATH =========="
+            )
+
+            println(
+                "USER ID = $userId"
+            )
+
+            println(
+                "LEARNING STEP ID = $learningStepId"
+            )
+
+            println(
+                "SCORE = ${grading.score}"
+            )
+
+            learningPathService.updateProgress(
+                userId = userId,
+                stepId = learningStepId,
+                score = grading.score
+            )
+
+            println(
+                "LEARNING PATH PROGRESS UPDATED"
+            )
+        }
         return getUserAssignment(
             userId = userId,
             userAssignmentId = userAssignmentId
@@ -1515,6 +1606,9 @@ class AssignmentService(
             userId =
                 row[UserAssignmentsTable.userId],
 
+            learningStepId =
+                row[UserAssignmentsTable.learningStepId],
+
             status =
                 row[UserAssignmentsTable.status],
 
@@ -1578,28 +1672,18 @@ class AssignmentService(
     // ============================================================
 
     data class UserAssignmentResult(
-
         val id: Int,
-
         val assignmentId: Int,
-
         val userId: Int,
-
         val status: String,
-
         val answer: String?,
-
         val score: Double?,
-
         val feedback: String?,
-
         val startedAt: Long?,
-
         val completedAt: Long?,
-
         val assignment: AssignmentResult,
-
-        val questionMetadata: List<QuestionMetadata>
+        val questionMetadata: List<QuestionMetadata>,
+        val learningStepId: Int? = null
     )
 
 

@@ -47,10 +47,7 @@ fun Application.configureRouting() {
     val aiService =
         AIService()
 
-    val assignmentService =
-        AssignmentService(
-            aiService
-        )
+
     val parentChildService =
         ParentChildService()
 
@@ -58,6 +55,11 @@ fun Application.configureRouting() {
     val leaderboardRepo = LeaderboardRepository()
     val avatarRepo = AvatarRepository()
     val learningPathService = LearningPathService()
+    val assignmentService =
+        AssignmentService(
+            aiService = aiService,
+            learningPathService = learningPathService
+        )
     routing {
 
         get("/") {

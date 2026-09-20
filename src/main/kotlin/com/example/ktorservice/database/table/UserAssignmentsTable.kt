@@ -37,6 +37,9 @@ object UserAssignmentsTable : Table("user_assignments") {
     val completedAt =
         long("completed_at")
             .nullable()
+    val learningStepId =
+        integer("learning_step_id")
+            .nullable()
 
     override val primaryKey =
         PrimaryKey(id)

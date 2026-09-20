@@ -224,13 +224,18 @@ class AIService {
         topic: String?,
         difficulty: Difficulty,
         previousAssignments: List<String> = emptyList(),
-        qualityFeedback: String? = null
+        qualityFeedback: String? = null,
+        learningStepTitle: String? = null,
+        learningStepSkill: String? = null,
+        learningStepDescription: String? = null
     ): GeneratedAssignment {
 
         println(
             "[AIService] generateAssignment " +
                     "grade=$grade subject=$subject topic=$topic " +
-                    "difficulty=$difficulty previous=${previousAssignments.size}"
+                    "difficulty=$difficulty " +
+                    "learningStep=${learningStepTitle ?: "none"} " +
+                    "previous=${previousAssignments.size}"
         )
 
         require(grade in 1..12) {
@@ -246,7 +251,10 @@ class AIService {
                 topic = topic,
                 difficulty = difficulty,
                 previousAssignments = previousAssignments,
-                qualityFeedback = qualityFeedback
+                qualityFeedback = qualityFeedback,
+                learningStepTitle = learningStepTitle,
+                learningStepSkill = learningStepSkill,
+                learningStepDescription = learningStepDescription
             )
         } else {
             buildPrompt(
@@ -255,7 +263,10 @@ class AIService {
                 topic = topic,
                 difficulty = difficulty,
                 previousAssignments = previousAssignments,
-                qualityFeedback = qualityFeedback
+                qualityFeedback = qualityFeedback,
+                learningStepTitle = learningStepTitle,
+                learningStepSkill = learningStepSkill,
+                learningStepDescription = learningStepDescription
             )
         }
 
@@ -293,7 +304,10 @@ class AIService {
         grade: Int,
         subject: String,
         topic: String?,
-        difficulty: Difficulty
+        difficulty: Difficulty,
+        learningStepTitle: String? = null,
+        learningStepSkill: String? = null,
+        learningStepDescription: String? = null
     ): GenerationBlueprint {
 
         val normalizedSubject = subject.trim().lowercase()
@@ -302,7 +316,13 @@ class AIService {
             ?.trim()
             ?.takeIf { it.isNotBlank() }
             ?: "nội dung phù hợp chương trình lớp $grade"
-
+        val learningStepText =
+            learningStepSkill
+                ?.trim()
+                ?.takeIf { it.isNotBlank() }
+                ?: learningStepTitle
+                    ?.trim()
+                    ?.takeIf { it.isNotBlank() }
         val isMath =
             normalizedSubject.contains("toán") ||
                     normalizedSubject.contains("math")
@@ -563,7 +583,10 @@ class AIService {
         topic: String?,
         difficulty: Difficulty,
         previousAssignments: List<String> = emptyList(),
-        qualityFeedback: String? = null
+        qualityFeedback: String? = null,
+        learningStepTitle: String? = null,
+        learningStepSkill: String? = null,
+        learningStepDescription: String? = null
     ): String {
 
         val topicText = topic
@@ -575,7 +598,10 @@ class AIService {
             grade = grade,
             subject = subject,
             topic = topicText,
-            difficulty = difficulty
+            difficulty = difficulty,
+            learningStepTitle = learningStepTitle,
+            learningStepSkill = learningStepSkill,
+            learningStepDescription = learningStepDescription
         )
 
         val difficultyText = when (difficulty) {
@@ -597,14 +623,20 @@ class AIService {
             ?.takeIf { it.isNotBlank() }
             ?.let {
                 """
-            === FEEDBACK TỪ LẦN TẠO TRƯỚC ===
-            $it
+    === FEEDBACK TỪ LẦN TẠO TRƯỚC ===
+    $it
 
-            Phải sửa toàn bộ lỗi được nêu.
-            Không được tạo lại cùng lỗi dưới cách diễn đạt khác.
-            """.trimIndent()
+    Phải sửa toàn bộ lỗi được nêu.
+    Không được tạo lại cùng lỗi dưới cách diễn đạt khác.
+    """.trimIndent()
             }
             ?: ""
+        val learningStepContext =
+            buildLearningStepContext(
+                learningStepTitle = learningStepTitle,
+                learningStepSkill = learningStepSkill,
+                learningStepDescription = learningStepDescription
+            )
 
         return """
         Bạn là giáo viên Việt Nam có kinh nghiệm thiết kế bài tập
@@ -617,9 +649,11 @@ class AIService {
         - Độ khó: $difficulty
         - Mô tả độ khó: $difficultyText
 
-        ${blueprintAsPrompt(blueprint)}
+      ${blueprintAsPrompt(blueprint)}
 
-        === NGUYÊN TẮC CHƯƠNG TRÌNH ===
+           $learningStepContext
+
+=== NGUYÊN TẮC CHƯƠNG TRÌNH ===
         - Chỉ sử dụng kiến thức học sinh lớp $grade có thể đã học.
         - Không tự ý dùng kiến thức lớp cao hơn.
         - Nội dung phải thuộc chủ đề.
@@ -789,7 +823,10 @@ class AIService {
         topic: String?,
         difficulty: Difficulty,
         previousAssignments: List<String> = emptyList(),
-        qualityFeedback: String? = null
+        qualityFeedback: String? = null,
+        learningStepTitle: String? = null,
+        learningStepSkill: String? = null,
+        learningStepDescription: String? = null
     ): String {
 
         val topicText = topic
@@ -818,7 +855,12 @@ class AIService {
             """.trimIndent()
             }
             ?: ""
-
+        val learningStepContext =
+            buildLearningStepContext(
+                learningStepTitle = learningStepTitle,
+                learningStepSkill = learningStepSkill,
+                learningStepDescription = learningStepDescription
+            )
         return """
         Bạn là giáo viên Việt Nam thiết kế bài học giáo dục sức khỏe
         giới tính/sức khỏe sinh sản phù hợp tuổi.
@@ -835,7 +877,7 @@ class AIService {
         ${getSexEducationDifficulty(difficulty)}
 
         ${blueprintAsPrompt(blueprint)}
-
+$learningStepContext
         === MỤC TIÊU ===
         Bài tập phải giúp học sinh:
         - hiểu kiến thức khoa học;
@@ -2183,7 +2225,10 @@ class AIService {
         grade: Int,
         subject: String,
         topic: String?,
-        difficulty: Difficulty
+        difficulty: Difficulty,
+        learningStepTitle: String? = null,
+        learningStepSkill: String? = null,
+        learningStepDescription: String? = null
     ): AssignmentQualityReview {
 
         val sexEducation =
@@ -2207,7 +2252,10 @@ class AIService {
                     grade = grade,
                     subject = subject,
                     topic = topic,
-                    difficulty = difficulty
+                    difficulty = difficulty,
+                    learningStepTitle = learningStepTitle,
+                    learningStepSkill = learningStepSkill,
+                    learningStepDescription = learningStepDescription
                 )
             }
 
@@ -2249,7 +2297,10 @@ class AIService {
         subject: String,
         topic: String?,
         difficulty: Difficulty,
-        blueprint: GenerationBlueprint
+        blueprint: GenerationBlueprint,
+        learningStepTitle: String? = null,
+        learningStepSkill: String? = null,
+        learningStepDescription: String? = null
     ): String {
 
         val questionsText = assignment.questions
@@ -2275,7 +2326,12 @@ class AIService {
                 ?.trim()
                 ?.takeIf { it.isNotBlank() }
                 ?: "(Không có learningMaterial)"
-
+        val learningStepContext =
+            buildLearningStepContext(
+                learningStepTitle = learningStepTitle,
+                learningStepSkill = learningStepSkill,
+                learningStepDescription = learningStepDescription
+            )
         return """
         Bạn là reviewer chất lượng giáo dục.
 
@@ -2288,7 +2344,7 @@ class AIService {
         Subject: $subject
         Topic: ${topic ?: "auto"}
         Difficulty: $difficulty
-
+$learningStepContext
         === BLUEPRINT MONG MUỐN ===
         ${blueprintAsPrompt(blueprint)}
 
@@ -2394,7 +2450,45 @@ class AIService {
         - tăng độ khó giả tạo bằng cách viết câu dài.
 
         ------------------------------------------------------------
+5B. LEARNING PATH COMPLIANCE
 
+Nếu có LearningStep hiện tại:
+
+- LearningStep là mục tiêu curriculum bắt buộc.
+- Tất cả câu hỏi phải chủ yếu đánh giá Skill hiện tại.
+- Không được nhảy sang kỹ năng của step tiếp theo.
+- Không được dùng skill nâng cao hơn chỉ để tăng độ khó.
+- Topic rộng không được dùng làm lý do để bỏ qua LearningStep.
+
+Đặc biệt:
+
+Cognitive progression Q1 → Q2 → Q3 phải xảy ra
+BÊN TRONG SKILL HIỆN TẠI.
+
+Ví dụ:
+
+Nếu current skill là:
+"Nhận biết tử số và mẫu số"
+
+thì:
+
+PASS:
+- nhận diện tử số;
+- nhận diện mẫu số;
+- giải thích vai trò;
+- phát hiện lỗi xác định tử số/mẫu số;
+- áp dụng trong ngữ cảnh vẫn yêu cầu nhận biết tử số/mẫu số.
+
+FAIL:
+- so sánh phân số;
+- quy đồng mẫu số;
+- cộng phân số;
+- trừ phân số;
+
+nếu các kỹ năng đó thuộc các LearningStep sau.
+
+Nếu một hoặc nhiều câu vượt current LearningStep:
+FAIL.
         6. COGNITIVE PROGRESSION
 
         Q1 phải thiên về hiểu/nền tảng.
@@ -3147,5 +3241,87 @@ class AIService {
         )
     }
 
+    private fun buildLearningStepContext(
+        learningStepTitle: String?,
+        learningStepSkill: String?,
+        learningStepDescription: String?
+    ): String {
 
+        val hasLearningStep =
+            !learningStepTitle.isNullOrBlank() ||
+                    !learningStepSkill.isNullOrBlank() ||
+                    !learningStepDescription.isNullOrBlank()
+
+        if (!hasLearningStep) {
+            return """
+        === LEARNING PATH ===
+        Không có LearningStep cụ thể.
+        Có thể tạo bài theo Topic và chương trình lớp học.
+        """.trimIndent()
+        }
+
+        return """
+    === LEARNING PATH / CURRENT LEARNING STEP ===
+
+    Đây là bước học HIỆN TẠI của học sinh.
+
+    Step title:
+    ${learningStepTitle ?: "(không có)"}
+
+    Skill bắt buộc:
+    ${learningStepSkill ?: "(không có)"}
+
+    Mô tả:
+    ${learningStepDescription ?: "(không có)"}
+
+    === QUY TẮC LEARNING STEP — BẮT BUỘC ===
+
+    1. LearningStep hiện tại là mục tiêu curriculum chính của bài này.
+
+    2. Cả 3 câu hỏi phải chủ yếu đánh giá SKILL của LearningStep
+       hiện tại.
+
+    3. Không được tự ý chuyển sang kỹ năng của LearningStep tiếp theo.
+
+    4. Không được dùng kỹ năng nâng cao hơn chỉ để làm câu hỏi khó hơn.
+
+    5. Nếu Topic rộng hơn LearningStep thì LearningStep được ưu tiên.
+
+    6. Q1, Q2 và Q3 có thể khác nhau về:
+       - ngữ cảnh;
+       - dữ kiện;
+       - cách hỏi;
+       - mức độ reasoning;
+       - tình huống áp dụng;
+
+       nhưng tất cả vẫn phải nằm trong cùng Skill hiện tại.
+
+    7. Cognitive progression KHÔNG có nghĩa là chuyển sang skill tiếp theo.
+
+       Ví dụ:
+       Nếu Skill hiện tại là:
+       "Nhận biết tử số và mẫu số"
+
+       thì có thể tăng độ sâu bằng cách:
+       - nhận diện;
+       - giải thích;
+       - áp dụng vào hình ảnh/ngữ cảnh;
+       - phát hiện lỗi;
+
+       nhưng KHÔNG được chuyển sang:
+       - so sánh phân số;
+       - cộng phân số;
+       - trừ phân số.
+
+    8. Không tạo câu hỏi chỉ thuộc Topic nhưng không phục vụ
+       LearningStep hiện tại.
+
+    9. Không coi việc đổi số hoặc đổi tên nhân vật là lý do
+       để sử dụng một skill khác.
+
+    10. Nếu không chắc một câu có thuộc LearningStep hiện tại hay không,
+        hãy chọn cách hỏi đơn giản hơn nhưng chắc chắn nằm trong
+        Skill hiện tại.
+    """.trimIndent()
+    }
 }
