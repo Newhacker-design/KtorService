@@ -11,6 +11,7 @@ import com.example.ktorservice.routes.authRoutes
 import com.example.ktorservice.routes.avatarRoutes
 import com.example.ktorservice.routes.deviceRoutes
 import com.example.ktorservice.routes.leaderboardRoutes
+import com.example.ktorservice.routes.learningPathRoutes
 import com.example.ktorservice.routes.licenseRoutes
 import com.example.ktorservice.routes.parentRoutes
 import com.example.ktorservice.routes.studentGradeRoutes
@@ -23,6 +24,7 @@ import io.ktor.server.routing.get
 import io.ktor.server.routing.routing
 import com.example.ktorservice.service.AuthService
 import com.example.ktorservice.service.DeviceService
+import com.example.ktorservice.service.LearningPathService
 import com.example.ktorservice.service.LicenseService
 import com.example.ktorservice.service.ParentChildService
 
@@ -55,6 +57,7 @@ fun Application.configureRouting() {
     val studentGradeRepo = StudentGradeRepository()
     val leaderboardRepo = LeaderboardRepository()
     val avatarRepo = AvatarRepository()
+    val learningPathService = LearningPathService()
     routing {
 
         get("/") {
@@ -101,5 +104,8 @@ fun Application.configureRouting() {
         studentGradeRoutes(authService, studentGradeRepo)
         leaderboardRoutes(authService, leaderboardRepo)
         avatarRoutes(authService, avatarRepo)
+        learningPathRoutes(
+            learningPathService = learningPathService
+        )
     }
 }
