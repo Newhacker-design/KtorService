@@ -5,7 +5,6 @@ import com.example.ktorservice.database.table.AssignmentsTable
 import com.example.ktorservice.database.table.UserAssignmentsTable
 import com.example.ktorservice.model.QuestionMetadata
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
@@ -13,7 +12,11 @@ import kotlinx.serialization.json.Json
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.transactions.transaction
-
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.withPermit
+import java.util.concurrent.ConcurrentHashMap
 
 class AssignmentService(
     private val aiService: AIService,
@@ -29,6 +32,7 @@ class AssignmentService(
     // ============================================================
 
     private val aiSemaphore = Semaphore(2)
+
 
 
     // ============================================================
@@ -137,6 +141,9 @@ class AssignmentService(
                 grade = grade,
                 subject = subject
             )
+// ========================================================
+// CHECK EXISTING ACTIVE ASSIGNMENT FOR CURRENT LEARNING STEP
+// ========================================================
 
         println("========== LEARNING PATH RESULT ==========")
 
@@ -199,11 +206,6 @@ class AssignmentService(
         println("TOPIC = $topic")
         println("DIFFICULTY = $difficulty")
 
-        // ========================================================
-        // BƯỚC 1
-        // Tìm bài đã có trong kho nhưng CHƯA giao cho user
-        // ========================================================
-
         val existingAssignment =
             if (nextLearningStep == null) {
 
@@ -217,14 +219,9 @@ class AssignmentService(
 
             } else {
 
-                // Assignment trong storage hiện tại chưa biết
-                // thuộc LearningStep nào.
-                //
-                // Không lấy assignment cũ để tránh gán nhầm
-                // nội dung của step khác vào step hiện tại.
-
                 println(
-                    "LEARNING PATH ACTIVE -> SKIP GENERIC ASSIGNMENT STORAGE"
+                    "LEARNING PATH ACTIVE -> " +
+                            "SKIP GENERIC ASSIGNMENT STORAGE"
                 )
 
                 null
@@ -233,7 +230,8 @@ class AssignmentService(
         if (existingAssignment != null) {
 
             println(
-                "ASSIGNMENT STORAGE HIT: id=${existingAssignment.id}"
+                "ASSIGNMENT STORAGE HIT: " +
+                        "id=${existingAssignment.id}"
             )
 
             return createUserAssignmentImmediately(
@@ -243,18 +241,9 @@ class AssignmentService(
             )
         }
 
-        println(
-            "NO AVAILABLE ASSIGNMENT IN STORAGE"
-        )
-
-        println(
-            "ASSIGNMENT STORAGE EMPTY"
-        )
-
-        println(
-            "WAITING FOR AI SEMAPHORE..."
-        )
-
+        println("NO AVAILABLE ASSIGNMENT IN STORAGE")
+        println("ASSIGNMENT STORAGE EMPTY")
+        println("WAITING FOR AI SEMAPHORE...")
         // ========================================================
         // BƯỚC 2
         // Generate + Validate + AI Quality Review
@@ -649,11 +638,487 @@ class AssignmentService(
         )
     }
 
+// ============================================================
+// FIND EXISTING ACTIVE USER ASSIGNMENT FOR LEARNING STEP
+// ============================================================
+//
+// Nếu học sinh đã có bài NEW hoặc IN_PROGRESS
+// thuộc đúng Learning Step hiện tại thì trả lại bài đó.
+//
+// Không lấy bài COMPLETED.
+// Không lấy bài của Learning Step khác.
+// ============================================================
 
+    private suspend fun findExistingUserAssignmentForLearningStep(
+        userId: Int,
+        learningStepId: Int
+    ): UserAssignmentResult? {
+
+        return withContext(Dispatchers.IO) {
+
+            transaction {
+
+                val userAssignmentRow =
+                    UserAssignmentsTable
+                        .selectAll()
+                        .where {
+
+                            (UserAssignmentsTable.userId eq userId) and
+                                    (
+                                            UserAssignmentsTable.learningStepId eq
+                                                    learningStepId
+                                            ) and
+                                    (
+                                            (UserAssignmentsTable.status eq "NEW") or
+                                                    (
+                                                            UserAssignmentsTable.status eq
+                                                                    "IN_PROGRESS"
+                                                            )
+                                            )
+                        }
+                        .orderBy(
+                            UserAssignmentsTable.id to SortOrder.DESC
+                        )
+                        .firstOrNull()
+
+                if (userAssignmentRow == null) {
+
+                    println(
+                        "NO ACTIVE USER ASSIGNMENT FOUND FOR " +
+                                "learningStepId=$learningStepId"
+                    )
+
+                    return@transaction null
+                }
+
+                val assignmentId =
+                    userAssignmentRow[
+                        UserAssignmentsTable.assignmentId
+                    ]
+
+                val assignmentRow =
+                    AssignmentsTable
+                        .selectAll()
+                        .where {
+
+                            AssignmentsTable.id eq assignmentId
+                        }
+                        .firstOrNull()
+
+                if (assignmentRow == null) {
+
+                    println(
+                        "⚠️ ACTIVE USER ASSIGNMENT FOUND BUT " +
+                                "ASSIGNMENT NOT FOUND: " +
+                                "assignmentId=$assignmentId"
+                    )
+
+                    return@transaction null
+                }
+
+                val assignment =
+                    rowToResult(
+                        assignmentRow
+                    )
+
+                val result =
+                    rowToUserAssignment(
+                        row = userAssignmentRow,
+                        assignment = assignment
+                    )
+
+                println(
+                    "========== EXISTING ACTIVE ASSIGNMENT FOUND =========="
+                )
+
+                println(
+                    "USER ID = ${result.userId}"
+                )
+
+                println(
+                    "USER ASSIGNMENT ID = ${result.id}"
+                )
+
+                println(
+                    "ASSIGNMENT ID = ${result.assignmentId}"
+                )
+
+                println(
+                    "LEARNING STEP ID = ${result.learningStepId}"
+                )
+
+                println(
+                    "STATUS = ${result.status}"
+                )
+
+                println(
+                    "TITLE = ${result.assignment.title}"
+                )
+
+                println(
+                    "======================================================="
+                )
+
+                result
+            }
+        }
+    }
     // ============================================================
     // CREATE USER ASSIGNMENT IMMEDIATELY
     // ============================================================
+    private suspend fun generateAndAssignLearningStep(
+        userId: Int,
+        grade: Int,
+        subject: String,
+        topic: String?,
+        difficulty: AIService.Difficulty,
+        nextLearningStep: Pair<com.example.ktorservice.model.LearningStep, com.example.ktorservice.model.StudentLearningProgress>
+    ): UserAssignmentResult {
 
+        println("========== GENERATE LEARNING STEP ASSIGNMENT ==========")
+        println("USER ID = $userId")
+        println("GRADE = $grade")
+        println("SUBJECT = $subject")
+        println("TOPIC = $topic")
+        println("DIFFICULTY = $difficulty")
+        println("LEARNING STEP ID = ${nextLearningStep.first.id}")
+        println("STEP ORDER = ${nextLearningStep.first.stepOrder}")
+        println("STEP TITLE = ${nextLearningStep.first.title}")
+        println("STEP SKILL = ${nextLearningStep.first.skill}")
+
+        var generated: AIService.GeneratedAssignment? = null
+        var lastErrors = emptyList<String>()
+
+        for (attempt in 1..3) {
+
+            println("==================================================")
+            println("ASSIGNMENT GENERATION ATTEMPT $attempt/3")
+            println("==================================================")
+
+            try {
+
+                val candidate =
+                    aiSemaphore.withPermit {
+
+                        println("AI GENERATE SLOT ACQUIRED")
+
+                        try {
+
+                            aiService.generateAssignment(
+                                grade = grade,
+                                subject = subject,
+                                topic = topic,
+                                difficulty = difficulty,
+                                qualityFeedback =
+                                    lastErrors
+                                        .joinToString("\n")
+                                        .ifBlank { null },
+
+                                learningStepTitle =
+                                    nextLearningStep.first.title,
+
+                                learningStepSkill =
+                                    nextLearningStep.first.skill,
+
+                                learningStepDescription =
+                                    nextLearningStep.first.description
+                            )
+
+                        } finally {
+
+                            println(
+                                "AI GENERATE SLOT RELEASED"
+                            )
+                        }
+                    }
+
+                println("AI GENERATED ASSIGNMENT")
+                println("TITLE = ${candidate.title}")
+
+                val validation =
+                    AssignmentValidator.validate(
+                        title = candidate.title,
+                        questions = candidate.questions,
+                        answerKey = candidate.answerKey,
+                        gradingGuide = candidate.gradingGuide,
+                        totalScore = candidate.totalScore,
+                        learningMaterial = candidate.learningMaterial
+                    )
+
+                if (!validation.valid) {
+
+                    println(
+                        "❌ ASSIGNMENT VALIDATOR FAILED"
+                    )
+
+                    validation.errors.forEach {
+                        println("❌ $it")
+                    }
+
+                    lastErrors =
+                        validation.errors
+
+                    if (attempt < 3) {
+
+                        println(
+                            "REGENERATING BECAUSE VALIDATOR FAILED..."
+                        )
+
+                        continue
+                    }
+
+                    throw IllegalStateException(
+                        "AI generated assignment failed validation after 3 attempts:\n" +
+                                validation.errors.joinToString("\n")
+                    )
+                }
+
+                println(
+                    "✅ ASSIGNMENT VALIDATOR PASSED"
+                )
+
+                println(
+                    "WAITING FOR AI QUALITY REVIEW SLOT..."
+                )
+
+                val qualityReview =
+                    aiSemaphore.withPermit {
+
+                        println(
+                            "AI QUALITY REVIEW SLOT ACQUIRED"
+                        )
+
+                        try {
+
+                            aiService.reviewGeneratedAssignment(
+                                assignment = candidate,
+                                grade = grade,
+                                subject = subject,
+                                topic = topic,
+                                difficulty = difficulty,
+
+                                learningStepTitle =
+                                    nextLearningStep.first.title,
+
+                                learningStepSkill =
+                                    nextLearningStep.first.skill,
+
+                                learningStepDescription =
+                                    nextLearningStep.first.description
+                            )
+
+                        } finally {
+
+                            println(
+                                "AI QUALITY REVIEW SLOT RELEASED"
+                            )
+                        }
+                    }
+
+                if (!qualityReview.pass) {
+
+                    println(
+                        "❌ AI QUALITY REVIEW FAILED"
+                    )
+
+                    qualityReview.issues.forEach {
+                        println("❌ $it")
+                    }
+
+                    lastErrors =
+                        if (qualityReview.issues.isNotEmpty()) {
+                            qualityReview.issues
+                        } else {
+                            listOf(
+                                qualityReview.summary.ifBlank {
+                                    "Assignment failed AI quality review"
+                                }
+                            )
+                        }
+
+                    if (attempt < 3) {
+
+                        println(
+                            "REGENERATING BECAUSE AI QUALITY REVIEW FAILED..."
+                        )
+
+                        continue
+                    }
+
+                    throw IllegalStateException(
+                        "AI generated assignment failed quality review after 3 attempts:\n" +
+                                lastErrors.joinToString("\n")
+                    )
+                }
+
+                println(
+                    "✅ AI QUALITY REVIEW PASSED"
+                )
+
+                generated = candidate
+
+                break
+
+            } catch (e: IllegalStateException) {
+
+                println(
+                    "❌ ASSIGNMENT GENERATION ERROR: ${e.message}"
+                )
+
+                if (attempt >= 3) {
+                    throw e
+                }
+
+                lastErrors =
+                    listOf(
+                        e.message
+                            ?: "Unknown assignment generation error"
+                    )
+            }
+        }
+
+        val finalGenerated =
+            generated
+                ?: throw IllegalStateException(
+                    "Unable to generate a valid assignment"
+                )
+
+        println(
+            "✅ GENERATED ASSIGNMENT PASSED VALIDATION"
+        )
+
+        val content =
+            buildAssignmentContent(
+                finalGenerated
+            )
+
+        val questionMetadata =
+            json.encodeToString(
+                finalGenerated.questions.map { question ->
+
+                    QuestionMetadata(
+                        id = question.id,
+                        question = question.question,
+                        learningObjective =
+                            question.learningObjective,
+                        points = question.points,
+                        answerType = question.answerType,
+                        gradingMethod = question.gradingMethod,
+                        sourceType = question.sourceType
+                    )
+                }
+            )
+
+        val answerKey =
+            finalGenerated.answerKey.joinToString("\n\n") { answer ->
+
+                "Câu ${answer.id}:\n${answer.answer}"
+            }
+
+        val gradingGuide =
+            finalGenerated.gradingGuide
+
+        val assignment =
+            withContext(Dispatchers.IO) {
+
+                transaction {
+
+                    val statement =
+                        AssignmentsTable.insert {
+
+                            it[AssignmentsTable.grade] =
+                                grade
+
+                            it[AssignmentsTable.subject] =
+                                subject
+
+                            it[AssignmentsTable.topic] =
+                                topic
+
+                            it[AssignmentsTable.difficulty] =
+                                difficulty.name
+
+                            it[AssignmentsTable.title] =
+                                finalGenerated.title
+
+                            it[AssignmentsTable.content] =
+                                content
+
+                            it[AssignmentsTable.answerKey] =
+                                answerKey
+
+                            it[AssignmentsTable.gradingGuide] =
+                                gradingGuide
+
+                            it[AssignmentsTable.totalScore] =
+                                finalGenerated.totalScore
+
+                            it[AssignmentsTable.questionMetadata] =
+                                questionMetadata
+
+                            it[AssignmentsTable.createdAt] =
+                                System.currentTimeMillis()
+                        }
+
+                    val id =
+                        statement[
+                            AssignmentsTable.id
+                        ]
+
+                    println(
+                        "NEW ASSIGNMENT SAVED: id=$id"
+                    )
+
+                    AssignmentResult(
+                        id = id,
+                        grade = grade,
+                        subject = subject,
+                        topic = topic,
+                        title = finalGenerated.title,
+                        content = content,
+                        answerKey = answerKey,
+                        gradingGuide = gradingGuide,
+                        totalScore = finalGenerated.totalScore,
+                        difficulty = difficulty,
+                        questionMetadata =
+                            finalGenerated.questions.map { question ->
+
+                                QuestionMetadata(
+                                    id = question.id,
+                                    question =
+                                        question.question,
+                                    learningObjective =
+                                        question.learningObjective,
+                                    points =
+                                        question.points,
+                                    answerType =
+                                        question.answerType,
+                                    gradingMethod =
+                                        question.gradingMethod,
+                                    sourceType =
+                                        question.sourceType
+                                )
+                            }
+                    )
+                }
+            }
+
+        println(
+            "ASSIGNING NEW AI ASSIGNMENT TO USER"
+        )
+
+        println("USER ID = $userId")
+        println("ASSIGNMENT ID = ${assignment.id}")
+        println(
+            "LEARNING STEP ID = ${nextLearningStep.first.id}"
+        )
+
+        return createUserAssignmentImmediately(
+            userId = userId,
+            assignment = assignment,
+            learningStepId = nextLearningStep.first.id
+        )
+    }
     private suspend fun createUserAssignmentImmediately(
         userId: Int,
         assignment: AssignmentResult,
@@ -684,6 +1149,36 @@ class AssignmentService(
                                 "user=$userId " +
                                 "assignment=${assignment.id}"
                     )
+
+                    // Nếu assignment này đang được gắn với Learning Path,
+                    // đảm bảo learningStepId được lưu đúng.
+                    if (learningStepId != null) {
+
+                        UserAssignmentsTable.update(
+                            where = {
+                                UserAssignmentsTable.id eq
+                                        existing[UserAssignmentsTable.id]
+                            }
+                        ) {
+
+                            it[UserAssignmentsTable.learningStepId] =
+                                learningStepId
+                        }
+
+                        val updated =
+                            UserAssignmentsTable
+                                .selectAll()
+                                .where {
+                                    UserAssignmentsTable.id eq
+                                            existing[UserAssignmentsTable.id]
+                                }
+                                .first()
+
+                        return@transaction rowToUserAssignment(
+                            updated,
+                            assignment
+                        )
+                    }
 
                     return@transaction rowToUserAssignment(
                         existing,
