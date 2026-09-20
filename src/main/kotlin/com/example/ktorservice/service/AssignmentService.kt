@@ -138,17 +138,60 @@ class AssignmentService(
                 subject = subject
             )
 
+        println("========== LEARNING PATH RESULT ==========")
+
         if (nextLearningStep != null) {
-            println("========== LEARNING PATH ==========")
-            println("LEARNING STEP ID = ${nextLearningStep.first.id}")
-            println("STEP ORDER = ${nextLearningStep.first.stepOrder}")
-            println("STEP TITLE = ${nextLearningStep.first.title}")
-            println("STEP SKILL = ${nextLearningStep.first.skill}")
-            println("STEP STATUS = ${nextLearningStep.second.status}")
-            println("MASTERY SCORE = ${nextLearningStep.second.masteryScore}")
-            println("ATTEMPT COUNT = ${nextLearningStep.second.attemptCount}")
-            println("===================================")
+
+            println(
+                "LEARNING STEP ID = ${nextLearningStep.first.id}"
+            )
+
+            println(
+                "STEP ORDER = ${nextLearningStep.first.stepOrder}"
+            )
+
+            println(
+                "STEP TITLE = ${nextLearningStep.first.title}"
+            )
+
+            println(
+                "STEP SKILL = ${nextLearningStep.first.skill}"
+            )
+
+            println(
+                "STEP DESCRIPTION = ${nextLearningStep.first.description}"
+            )
+
+            println(
+                "STEP STATUS = ${nextLearningStep.second.status}"
+            )
+
+            println(
+                "MASTERY SCORE = ${nextLearningStep.second.masteryScore}"
+            )
+
+            println(
+                "ATTEMPT COUNT = ${nextLearningStep.second.attemptCount}"
+            )
+
+        } else {
+
+            println(
+                "LEARNING PATH = NULL"
+            )
+
+            println(
+                "NO LEARNING PATH FOR " +
+                        "userId=$userId " +
+                        "grade=$grade " +
+                        "subject=$subject"
+            )
         }
+
+        println(
+            "=========================================="
+        )
+
         println("========== GET NEXT ASSIGNMENT ==========")
         println("USER ID = $userId")
         println("GRADE = $grade")
