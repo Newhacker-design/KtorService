@@ -13,9 +13,28 @@ import kotlin.math.abs
 
 class AIService {
 
-    // ============================================================
-    // PUBLIC API / MODELS
-    // ============================================================
+
+    private val sourceReferencePatterns = listOf(
+        Regex("""\bđoạn\s+văn\s+(trên|dưới|sau|đây)\b""", RegexOption.IGNORE_CASE),
+        Regex("""\bbài\s+(đọc|học)\s+(trên|dưới|sau|đây)\b""", RegexOption.IGNORE_CASE),
+        Regex("""\bnội\s+dung\s+(trên|dưới|sau|đây)\b""", RegexOption.IGNORE_CASE),
+        Regex("""\bbảng\s+(trên|dưới|sau|đây)\b""", RegexOption.IGNORE_CASE),
+        Regex("""\bhình\s+(trên|dưới|sau|đây)\b""", RegexOption.IGNORE_CASE),
+        Regex("""\bdựa\s+vào\s+(đoạn|bài|nội\s+dung|bảng|hình)\b""", RegexOption.IGNORE_CASE),
+        Regex("""\bđọc\s+(đoạn\s+văn|bài\s+đọc)\b""", RegexOption.IGNORE_CASE),
+        Regex("""\btheo\s+(nội\s+dung|bài\s+học|đoạn\s+văn)\b""", RegexOption.IGNORE_CASE)
+    )
+
+// ============================================================
+// PUBLIC API / MODELS
+// ============================================================
+
+    @Serializable
+    enum class QuestionSourceType {
+        SELF_CONTAINED,
+        LESSON_CONTENT,
+        READING_PASSAGE
+    }
 
     @Serializable
     enum class AnswerType {
@@ -54,7 +73,9 @@ class AIService {
         val learningObjective: String,
         val points: Double,
         val answerType: AnswerType,
-        val gradingMethod: GradingMethod
+        val gradingMethod: GradingMethod,
+        val sourceType: QuestionSourceType =
+            QuestionSourceType.SELF_CONTAINED
     )
 
     @Serializable
@@ -66,6 +87,7 @@ class AIService {
     @Serializable
     data class GeneratedAssignment(
         val title: String,
+        val learningMaterial: String? = null,
         val questions: List<GeneratedQuestion>,
         val answerKey: List<GeneratedAnswer>,
         val gradingGuide: String,
@@ -93,12 +115,9 @@ class AIService {
         val questions: List<QuestionGradingResult> = emptyList()
     )
 
-    // ============================================================
-    // V2 INTERNAL BLUEPRINT
-    //
-    // Không đưa các field này vào GeneratedQuestion để giữ API cũ.
-    // Blueprint chỉ tồn tại trong quá trình tạo prompt/review.
-    // ============================================================
+// ============================================================
+// INTERNAL BLUEPRINT
+// ============================================================
 
     private enum class CognitiveLevel {
         RECALL,
@@ -137,9 +156,9 @@ class AIService {
         val questions: List<BlueprintQuestion>
     )
 
-    // ============================================================
-    // GEMINI CONFIG
-    // ============================================================
+// ============================================================
+// GEMINI CONFIG
+// ============================================================
 
     private val apiKey: String?
         get() = System.getenv("GEMINI_API_KEY")
@@ -148,10 +167,12 @@ class AIService {
         get() = System.getenv("GEMINI_SEX_EDUCATION_API_KEY")
 
     private val model: String
-        get() = System.getenv("GEMINI_MODEL") ?: "gemini-3.5-flash-lite"
+        get() = System.getenv("GEMINI_MODEL")
+            ?: "gemini-3.5-flash-lite"
 
     private val sexEducationModel: String
-        get() = System.getenv("GEMINI_SEX_EDUCATION_MODEL") ?: model
+        get() = System.getenv("GEMINI_SEX_EDUCATION_MODEL")
+            ?: model
 
     private val json = Json {
         ignoreUnknownKeys = true
@@ -159,11 +180,12 @@ class AIService {
         explicitNulls = false
     }
 
-    // ============================================================
-    // SUBJECT
-    // ============================================================
+// ============================================================
+// SUBJECT
+// ============================================================
 
     private fun getSubjectType(subject: String): SubjectType {
+
         val normalized = subject
             .trim()
             .lowercase()
@@ -171,7 +193,7 @@ class AIService {
             .replace("_", " ")
             .replace(Regex("\\s+"), " ")
 
-        val sexEducationAliases = setOf(
+        val aliases = setOf(
             "giao duc gioi tinh",
             "giao duc suc khoe sinh san",
             "suc khoe sinh san",
@@ -182,20 +204,19 @@ class AIService {
             "sexual education"
         )
 
-        return if (normalized in sexEducationAliases) {
+        return if (normalized in aliases) {
             SubjectType.SEX_EDUCATION
         } else {
             SubjectType.NORMAL
         }
     }
 
-    private fun isSexEducation(subject: String): Boolean {
-        return getSubjectType(subject) == SubjectType.SEX_EDUCATION
-    }
+    private fun isSexEducation(subject: String): Boolean =
+        getSubjectType(subject) == SubjectType.SEX_EDUCATION
 
-    // ============================================================
-    // MAIN GENERATION API
-    // ============================================================
+// ============================================================
+// GENERATION
+// ============================================================
 
     suspend fun generateAssignment(
         grade: Int,
@@ -208,8 +229,8 @@ class AIService {
 
         println(
             "[AIService] generateAssignment " +
-                    "grade=$grade subject=$subject topic=$topic difficulty=$difficulty " +
-                    "previous=${previousAssignments.size}"
+                    "grade=$grade subject=$subject topic=$topic " +
+                    "difficulty=$difficulty previous=${previousAssignments.size}"
         )
 
         require(grade in 1..12) {
@@ -264,9 +285,9 @@ class AIService {
         return assignment
     }
 
-    // ============================================================
-    // BLUEPRINT
-    // ============================================================
+// ============================================================
+// BLUEPRINT
+// ============================================================
 
     private fun createBlueprint(
         grade: Int,
@@ -282,16 +303,19 @@ class AIService {
             ?.takeIf { it.isNotBlank() }
             ?: "nội dung phù hợp chương trình lớp $grade"
 
-        val isMath = normalizedSubject.contains("toán") ||
-                normalizedSubject.contains("math")
+        val isMath =
+            normalizedSubject.contains("toán") ||
+                    normalizedSubject.contains("math")
 
-        val isLanguage = normalizedSubject.contains("ngữ văn") ||
-                normalizedSubject.contains("văn") ||
-                normalizedSubject.contains("literature") ||
-                normalizedSubject.contains("tiếng việt")
+        val isLanguage =
+            normalizedSubject.contains("ngữ văn") ||
+                    normalizedSubject.contains("văn") ||
+                    normalizedSubject.contains("literature") ||
+                    normalizedSubject.contains("tiếng việt")
 
-        val isEnglish = normalizedSubject.contains("anh") ||
-                normalizedSubject.contains("english")
+        val isEnglish =
+            normalizedSubject.contains("anh") ||
+                    normalizedSubject.contains("english")
 
         val questions = when {
             isMath -> createMathBlueprint(difficulty)
@@ -301,22 +325,22 @@ class AIService {
                     1,
                     CognitiveLevel.UNDERSTAND,
                     QuestionStrategy.EVIDENCE,
-                    "Xác định và giải thích nội dung/ý nghĩa chính dựa trực tiếp trên kiến thức hoặc ngữ liệu.",
-                    "Không chỉ yêu cầu chép lại một câu hoặc định nghĩa."
+                    "Xác định và giải thích nội dung hoặc ý nghĩa chính.",
+                    "Không chỉ chép lại câu hoặc định nghĩa."
                 ),
                 BlueprintQuestion(
                     2,
                     CognitiveLevel.APPLY,
                     QuestionStrategy.COMPARISON,
-                    "Vận dụng kiến thức để phân tích, so sánh hoặc giải thích một trường hợp cụ thể.",
-                    "Không lặp lại đúng thao tác của câu 1."
+                    "Vận dụng kiến thức để phân tích, so sánh hoặc giải thích trường hợp cụ thể.",
+                    "Không lặp lại thao tác của câu 1."
                 ),
                 BlueprintQuestion(
                     3,
                     CognitiveLevel.REASON,
                     QuestionStrategy.EXPLANATION,
                     "Phân tích, lập luận hoặc đưa ra nhận xét có căn cứ.",
-                    "Không biến thành câu hỏi nhớ lại đơn giản."
+                    "Không biến thành câu hỏi nhớ lại."
                 )
             )
 
@@ -325,22 +349,22 @@ class AIService {
                     1,
                     CognitiveLevel.UNDERSTAND,
                     QuestionStrategy.DIRECT,
-                    "Kiểm tra kiến thức/ngôn ngữ cốt lõi của chủ đề.",
+                    "Kiểm tra kiến thức/ngôn ngữ cốt lõi.",
                     "Không dùng cấu trúc ngoài trình độ."
                 ),
                 BlueprintQuestion(
                     2,
                     CognitiveLevel.APPLY,
                     QuestionStrategy.REAL_WORLD,
-                    "Đưa kiến thức vào một tình huống giao tiếp hoặc ngữ cảnh cụ thể.",
+                    "Đưa kiến thức vào tình huống giao tiếp hoặc ngữ cảnh cụ thể.",
                     "Không chỉ thay vài từ của câu 1."
                 ),
                 BlueprintQuestion(
                     3,
                     CognitiveLevel.REASON,
                     QuestionStrategy.ERROR_ANALYSIS,
-                    "Phát hiện, sửa hoặc giải thích lỗi trong một tình huống phù hợp.",
-                    "Không sử dụng lỗi giả tạo hoặc không tự nhiên."
+                    "Phát hiện, sửa hoặc giải thích lỗi.",
+                    "Không dùng lỗi giả tạo."
                 )
             )
 
@@ -349,22 +373,22 @@ class AIService {
                     1,
                     CognitiveLevel.UNDERSTAND,
                     QuestionStrategy.DIRECT,
-                    "Kiểm tra kiến thức nền tảng và khả năng giải thích bằng lời của học sinh.",
-                    "Không chỉ yêu cầu học thuộc máy móc."
+                    "Kiểm tra kiến thức nền tảng và khả năng giải thích.",
+                    "Không chỉ yêu cầu học thuộc."
                 ),
                 BlueprintQuestion(
                     2,
                     CognitiveLevel.APPLY,
                     QuestionStrategy.REAL_WORLD,
-                    "Vận dụng kiến thức vào một tình huống cụ thể, gần với thực tế hoặc bài học.",
-                    "Không lặp lại dữ kiện hoặc cách giải của câu 1."
+                    "Vận dụng kiến thức vào tình huống cụ thể.",
+                    "Không lặp lại dữ kiện hoặc cách giải Q1."
                 ),
                 BlueprintQuestion(
                     3,
                     CognitiveLevel.REASON,
                     QuestionStrategy.CAUSE_EFFECT,
-                    "Phân tích nguyên nhân, hậu quả, bằng chứng hoặc lựa chọn phù hợp.",
-                    "Không hỏi lại cùng một kiến thức dưới cách diễn đạt khác."
+                    "Phân tích nguyên nhân, hậu quả, bằng chứng hoặc lựa chọn.",
+                    "Không hỏi lại cùng kiến thức."
                 )
             )
         }
@@ -383,27 +407,28 @@ class AIService {
     ): List<BlueprintQuestion> {
 
         return when (difficulty) {
+
             Difficulty.EASY -> listOf(
                 BlueprintQuestion(
                     1,
                     CognitiveLevel.UNDERSTAND,
                     QuestionStrategy.DIRECT,
-                    "Kiểm tra kỹ năng/toán kiến thức nền tảng.",
-                    "Không chỉ đổi số từ một bài có sẵn."
+                    "Kiểm tra kỹ năng toán nền tảng.",
+                    "Không chỉ đổi số."
                 ),
                 BlueprintQuestion(
                     2,
                     CognitiveLevel.APPLY,
                     QuestionStrategy.WORD_PROBLEM,
-                    "Áp dụng kiến thức vào bài toán có ngữ cảnh rõ ràng.",
+                    "Áp dụng kiến thức vào bài toán có ngữ cảnh.",
                     "Không dùng đúng mô hình câu 1."
                 ),
                 BlueprintQuestion(
                     3,
                     CognitiveLevel.REASON,
                     QuestionStrategy.ERROR_ANALYSIS,
-                    "Phát hiện và sửa lỗi hoặc giải thích vì sao một cách làm đúng/sai.",
-                    "Không biến thành phép tính lặp lại."
+                    "Phát hiện và sửa lỗi hoặc giải thích đúng/sai.",
+                    "Không biến thành phép tính lặp."
                 )
             )
 
@@ -412,21 +437,21 @@ class AIService {
                     1,
                     CognitiveLevel.UNDERSTAND,
                     QuestionStrategy.EXPLANATION,
-                    "Kiểm tra hiểu bản chất và khả năng giải thích.",
-                    "Không chỉ yêu cầu một đáp số."
+                    "Kiểm tra hiểu bản chất.",
+                    "Không chỉ yêu cầu đáp số."
                 ),
                 BlueprintQuestion(
                     2,
                     CognitiveLevel.APPLY,
                     QuestionStrategy.WORD_PROBLEM,
-                    "Vận dụng vào tình huống thực tế với dữ kiện đầy đủ.",
+                    "Vận dụng vào tình huống thực tế.",
                     "Không chỉ thay số."
                 ),
                 BlueprintQuestion(
                     3,
                     CognitiveLevel.REASON,
                     QuestionStrategy.MULTI_STEP,
-                    "Giải quyết bài toán nhiều bước hoặc cần kết hợp ít nhất hai ý.",
+                    "Giải quyết bài toán nhiều bước.",
                     "Không yêu cầu kiến thức vượt chương trình."
                 )
             )
@@ -436,25 +461,62 @@ class AIService {
                     1,
                     CognitiveLevel.APPLY,
                     QuestionStrategy.WORD_PROBLEM,
-                    "Vận dụng chắc chắn kiến thức trọng tâm.",
+                    "Vận dụng kiến thức trọng tâm.",
                     "Không dùng kiến thức ngoài chương trình."
                 ),
                 BlueprintQuestion(
                     2,
                     CognitiveLevel.REASON,
                     QuestionStrategy.MULTI_STEP,
-                    "Kết hợp nhiều bước hoặc nhiều đại lượng để giải quyết vấn đề.",
-                    "Không chỉ tăng số lượng phép tính."
+                    "Kết hợp nhiều bước hoặc đại lượng.",
+                    "Không chỉ tăng số phép tính."
                 ),
                 BlueprintQuestion(
                     3,
                     CognitiveLevel.REASON,
                     QuestionStrategy.ERROR_ANALYSIS,
-                    "Phân tích một cách giải, tìm lỗi hoặc lựa chọn chiến lược giải hợp lý.",
-                    "Không đánh đố hoặc dùng kiến thức chưa học."
+                    "Phân tích cách giải hoặc chiến lược giải.",
+                    "Không đánh đố."
                 )
             )
         }
+    }
+
+    private fun createSexEducationBlueprint(
+        grade: Int,
+        topic: String,
+        difficulty: Difficulty
+    ): GenerationBlueprint {
+
+        return GenerationBlueprint(
+            subject = "Giáo dục sức khỏe giới tính",
+            grade = grade,
+            topic = topic,
+            difficulty = difficulty,
+            questions = listOf(
+                BlueprintQuestion(
+                    1,
+                    CognitiveLevel.UNDERSTAND,
+                    QuestionStrategy.DIRECT,
+                    "Hiểu kiến thức nền tảng phù hợp độ tuổi.",
+                    "Không hỏi trải nghiệm cá nhân."
+                ),
+                BlueprintQuestion(
+                    2,
+                    CognitiveLevel.APPLY,
+                    QuestionStrategy.DECISION,
+                    "Vận dụng kiến thức vào tình huống an toàn.",
+                    "Không tạo tình huống nhạy cảm không cần thiết."
+                ),
+                BlueprintQuestion(
+                    3,
+                    CognitiveLevel.REASON,
+                    QuestionStrategy.CAUSE_EFFECT,
+                    "Phân tích tình huống và giải thích lựa chọn an toàn.",
+                    "Không yêu cầu tiết lộ đời sống riêng tư."
+                )
+            )
+        )
     }
 
     private fun blueprintAsPrompt(
@@ -463,43 +525,37 @@ class AIService {
 
         return buildString {
             appendLine("=== GENERATION BLUEPRINT V2 ===")
-            appendLine("Blueprint này là ràng buộc nội bộ. Không đưa blueprint vào JSON output.")
-            appendLine("Mục tiêu: tạo 3 câu hỏi có vai trò khác nhau, không phải 3 biến thể của cùng một bài.")
+            appendLine(
+                "Blueprint là ràng buộc nội bộ, không đưa vào JSON output."
+            )
             appendLine()
 
             blueprint.questions.forEach { q ->
-                appendLine(
-                    """
-                    Q${q.id}:
-                    - Cognitive level: ${q.cognitiveLevel}
-                    - Strategy: ${q.strategy}
-                    - Purpose: ${q.purpose}
-                    - Avoid: ${q.avoid}
-                    """.trimIndent()
-                )
+                appendLine("Q${q.id}:")
+                appendLine("- Cognitive level: ${q.cognitiveLevel}")
+                appendLine("- Strategy: ${q.strategy}")
+                appendLine("- Purpose: ${q.purpose}")
+                appendLine("- Avoid: ${q.avoid}")
                 appendLine()
             }
 
             appendLine("YÊU CẦU TIẾN TRIỂN NHẬN THỨC:")
-            appendLine("- Q1 phải tạo nền tảng để kiểm tra hiểu biết/kỹ năng cốt lõi.")
-            appendLine("- Q2 phải vận dụng kiến thức vào dữ kiện hoặc ngữ cảnh khác Q1.")
-            appendLine("- Q3 phải yêu cầu suy luận/phân tích/đánh giá lỗi/giải quyết vấn đề khi phù hợp.")
-            appendLine("- Không được tăng độ khó chỉ bằng cách thêm số lớn hơn.")
-            appendLine("- Không được tăng độ khó chỉ bằng cách đổi tên nhân vật.")
-            appendLine("- Không được dùng cùng một cấu trúc giải cho cả 3 câu nếu không có lý do sư phạm rõ ràng.")
+            appendLine("- Q1: nền tảng, hiểu kiến thức.")
+            appendLine("- Q2: vận dụng vào dữ kiện/ngữ cảnh khác.")
+            appendLine("- Q3: suy luận/phân tích/giải quyết vấn đề khi phù hợp.")
+            appendLine("- Không tăng độ khó chỉ bằng số lớn hơn.")
+            appendLine("- Không đổi tên nhân vật để giả tạo độ khó.")
             appendLine()
             appendLine("YÊU CẦU DIVERSITY:")
-            appendLine("- Mỗi câu phải có một mục tiêu nhận thức riêng.")
-            appendLine("- Mỗi câu nên có strategy khác nhau.")
-            appendLine("- Không lặp cùng context, cùng dữ kiện hoặc cùng answer pattern.")
-            appendLine("- Nếu cùng một kiến thức, phải thay đổi cách vận dụng hoặc cách suy luận.")
-            appendLine("- Không tạo ba câu chỉ khác con số.")
+            appendLine("- Mỗi câu có mục tiêu nhận thức riêng.")
+            appendLine("- Không lặp context, dữ kiện hoặc answer pattern.")
+            appendLine("- Cùng kiến thức thì phải khác cách vận dụng hoặc suy luận.")
         }
     }
 
-    // ============================================================
-    // NORMAL PROMPT V2
-    // ============================================================
+// ============================================================
+// NORMAL PROMPT
+// ============================================================
 
     private fun buildPrompt(
         grade: Int,
@@ -524,225 +580,510 @@ class AIService {
 
         val difficultyText = when (difficulty) {
             Difficulty.EASY ->
-                "Cơ bản đến vừa phải. Ưu tiên hiểu kiến thức, nhận biết, giải thích và vận dụng trực tiếp."
+                "Cơ bản đến vừa phải. Ưu tiên hiểu, giải thích và vận dụng trực tiếp."
 
             Difficulty.MEDIUM ->
                 "Trung bình. Phải có vận dụng, tình huống, nhiều bước hoặc phân tích khi phù hợp."
 
             Difficulty.HARD ->
-                "Khá khó. Ưu tiên vận dụng cao, phân tích, suy luận và giải quyết vấn đề nhưng tuyệt đối không vượt chương trình."
+                "Khá khó. Ưu tiên vận dụng cao, phân tích và suy luận nhưng không vượt chương trình."
         }
 
-        val previousText = buildPreviousAssignmentsContext(previousAssignments)
+        val previousText =
+            buildPreviousAssignmentsContext(previousAssignments)
 
         val qualityText = qualityFeedback
             ?.trim()
             ?.takeIf { it.isNotBlank() }
             ?.let {
                 """
-                === FEEDBACK TỪ LẦN TẠO TRƯỚC ===
-                $it
+            === FEEDBACK TỪ LẦN TẠO TRƯỚC ===
+            $it
 
-                Phải sửa toàn bộ lỗi được nêu.
-                Không được tạo lại cùng lỗi dưới cách diễn đạt khác.
-                """.trimIndent()
+            Phải sửa toàn bộ lỗi được nêu.
+            Không được tạo lại cùng lỗi dưới cách diễn đạt khác.
+            """.trimIndent()
             }
             ?: ""
 
         return """
-            Bạn là giáo viên Việt Nam có kinh nghiệm thiết kế bài tập theo chương trình phổ thông.
+        Bạn là giáo viên Việt Nam có kinh nghiệm thiết kế bài tập
+        theo chương trình phổ thông.
 
-            Hãy tạo MỘT bài tập cho:
-            - Lớp: $grade
-            - Môn: $subject
-            - Chủ đề: $topicText
-            - Độ khó: $difficulty
-            - Mô tả độ khó: $difficultyText
+        Hãy tạo MỘT bài tập cho:
+        - Lớp: $grade
+        - Môn: $subject
+        - Chủ đề: $topicText
+        - Độ khó: $difficulty
+        - Mô tả độ khó: $difficultyText
 
-            ${blueprintAsPrompt(blueprint)}
+        ${blueprintAsPrompt(blueprint)}
 
-            === NGUYÊN TẮC CHƯƠNG TRÌNH ===
-            1. Chỉ sử dụng kiến thức học sinh lớp $grade có thể đã được học.
-            2. Không tự ý đưa công thức, định lý, thuật ngữ hoặc phương pháp của lớp cao hơn.
-            3. Nội dung phải thực sự thuộc chủ đề.
-            4. Dữ kiện phải đủ để giải.
-            5. Câu hỏi phải có nghĩa tự nhiên bằng tiếng Việt.
-            6. Không tạo câu hỏi mơ hồ hoặc có nhiều đáp án đúng nếu không nói rõ.
-            7. Đáp án phải thực sự trả lời đúng câu hỏi.
-            8. Learning objective phải thể hiện rõ học sinh cần biết/làm được gì.
+        === NGUYÊN TẮC CHƯƠNG TRÌNH ===
+        - Chỉ sử dụng kiến thức học sinh lớp $grade có thể đã học.
+        - Không tự ý dùng kiến thức lớp cao hơn.
+        - Nội dung phải thuộc chủ đề.
+        - Dữ kiện phải đủ để giải.
+        - Tiếng Việt tự nhiên.
+        - Không mơ hồ.
+        - AnswerKey phải thực sự trả lời câu hỏi.
+        - Learning objective phải rõ ràng.
 
-            === QUY TẮC DIVERSITY ===
-            Ba câu hỏi phải khác nhau về giá trị giáo dục.
+        === DIVERSITY ===
+        Không được:
+        - chỉ thay số;
+        - chỉ đổi tên;
+        - chỉ thay vài từ;
+        - giữ nguyên context;
+        - dùng cùng cách giải cho cả 3 câu;
+        - hỏi cùng kiến thức ba lần;
+        - làm Q2/Q3 dài hơn nhưng không sâu hơn.
 
-            KHÔNG được:
-            - sao chép câu cũ;
-            - chỉ thay vài từ;
-            - chỉ đổi số;
-            - chỉ đổi tên nhân vật;
-            - giữ nguyên context rồi đổi đáp án;
-            - dùng cùng một quy trình giải cho cả ba câu;
-            - hỏi cùng một kiến thức ba lần;
-            - tạo Q2/Q3 chỉ dài hơn Q1 nhưng không sâu hơn.
+        === CẤU TRÚC NHẬN THỨC ===
+        Q1: nền tảng, hiểu và sử dụng kiến thức cốt lõi.
+        Q2: vận dụng, tình huống thực tế, so sánh hoặc giải thích.
+        Q3: suy luận, phân tích, error analysis, cause-effect,
+        decision hoặc problem solving.
 
-            Nếu có thể dùng lại cùng kiến thức thì phải thay đổi:
-            - ngữ cảnh;
-            - loại dữ kiện;
-            - cách suy luận;
-            - mục tiêu kỹ năng;
-            - hoặc cách kiểm tra hiểu biết.
+        === CHẤT LƯỢNG NGÔN NGỮ ===
+        Không được tạo:
+        - từ vô nghĩa;
+        - câu dịch máy;
+        - cụm từ sai ngữ nghĩa;
+        - câu thiếu dữ kiện;
+        - placeholder;
+        - undefined;
+        - null;
+        - lorem ipsum;
+        - chuỗi ký tự bất thường.
 
-            === CẤU TRÚC NHẬN THỨC ===
-            Q1:
-            - nền tảng;
-            - kiểm tra hiểu và sử dụng kiến thức cốt lõi.
+        === ANSWER TYPE ===
+        Chỉ:
+        - TEXT
+        - HANDWRITING
+        - SPEECH_TO_TEXT
 
-            Q2:
-            - vận dụng;
-            - ưu tiên word problem, tình huống thực tế, so sánh hoặc giải thích.
+        Mapping:
+        - TEXT -> EXACT hoặc AI_TEXT
+        - HANDWRITING -> OCR_AI
+        - SPEECH_TO_TEXT -> EXACT hoặc AI_TEXT
 
-            Q3:
-            - suy luận/phân tích;
-            - ưu tiên multi-step, error analysis, cause-effect, decision hoặc problem solving.
+        Không dùng DRAWING hoặc MIXED.
 
-            Nếu môn học không phù hợp với một strategy cụ thể, hãy chọn strategy tương đương nhưng vẫn phải đảm bảo Q1/Q2/Q3 khác nhau về tư duy.
+        === QUY TẮC VỀ NGUỒN NỘI DUNG ===
 
-            === CHẤT LƯỢNG NGÔN NGỮ ===
-            Không được tạo:
-            - từ vô nghĩa;
-            - câu dịch máy khó hiểu;
-            - cụm từ sai ngữ nghĩa;
-            - câu hỏi thiếu chủ ngữ/dữ kiện;
-            - từ bị ghép sai;
-            - placeholder;
-            - "undefined";
-            - "null";
-            - "lorem ipsum";
-            - chuỗi ký tự bất thường.
+        Mỗi câu hỏi phải có sourceType:
 
-            Tự đọc lại từng câu như một giáo viên trước khi trả JSON.
+        1. SELF_CONTAINED
+        - Câu hỏi tự chứa đủ thông tin.
+        - Không phụ thuộc tài liệu không được cung cấp.
 
-            === ANSWER TYPE ===
-            Chỉ sử dụng:
-            - TEXT
-            - HANDWRITING
-            - SPEECH_TO_TEXT
+        2. LESSON_CONTENT
+        - Dựa trên nội dung bài học.
+        - Nếu cần đọc nội dung bài học để trả lời,
+          phải cung cấp trong learningMaterial.
 
-            Không sử dụng DRAWING hoặc MIXED vì ControlReceiver hiện chưa hỗ trợ.
+        3. READING_PASSAGE
+        - Câu hỏi đọc hiểu.
+        - BẮT BUỘC có learningMaterial chứa đầy đủ bài đọc.
 
-            Mapping bắt buộc:
-            - TEXT -> EXACT hoặc AI_TEXT
-            - HANDWRITING -> OCR_AI
-            - SPEECH_TO_TEXT -> EXACT hoặc AI_TEXT
+        QUY TẮC BẮT BUỘC:
 
-            SPEECH_TO_TEXT chỉ dùng khi việc trả lời bằng lời thực sự phù hợp.
+        - Nếu có LESSON_CONTENT hoặc READING_PASSAGE,
+          learningMaterial không được null/rỗng.
+        - learningMaterial phải chứa đủ nội dung cần thiết.
+        - Không viết "Đọc đoạn văn trên", "Dựa vào bài học trên",
+          "Theo bảng trên", "Nhìn vào hình trên" nếu nội dung không tồn tại.
+        - Không yêu cầu học sinh tự tìm Internet/sách/nguồn ngoài.
+        - Nếu nhiều câu dùng chung bài đọc, đặt toàn bộ bài đọc
+          vào learningMaterial.
+        - learningMaterial phải thực sự có giá trị giáo dục.
+        - Không tạo material chỉ để đối phó validator.
+        - Ưu tiên SELF_CONTAINED nếu câu hỏi đã đủ dữ kiện.
 
-            === MÔN HỌC ===
-            Nếu là Toán:
-            - dữ kiện phải đủ;
-            - không có đáp án mâu thuẫn;
-            - đáp số và lời giải phải khớp;
-            - nếu yêu cầu giải thích thì answerKey phải chứa tiêu chí giải thích.
+        === ĐIỂM ===
+        Chính xác 3 câu, tổng 10 điểm.
 
-            Nếu là Ngữ văn:
-            - đánh giá ý nghĩa, lập luận, bằng chứng hoặc khả năng phân tích;
-            - chấp nhận cách diễn đạt khác nếu nội dung đúng;
-            - không biến thành câu hỏi học thuộc đơn thuần.
+        === TỰ KIỂM TRA ===
+        - Đúng 3 câu.
+        - ID 1,2,3.
+        - Có learningObjective.
+        - Q1/Q2/Q3 khác nhau về tư duy.
+        - Có đúng 3 answerKey.
+        - ID answerKey khớp.
+        - Tổng điểm = 10.
+        - GradingGuide khớp.
+        - Không DRAWING/MIXED.
+        - AnswerType và GradingMethod tương thích.
+        - Không lỗi chính tả/ngữ nghĩa.
+        - Không kiến thức vượt lớp.
+        - JSON hợp lệ.
+        - Không markdown ngoài JSON.
 
-            Nếu là Tiếng Anh:
-            - câu hỏi phải phù hợp trình độ;
-            - nếu có nhiều cách trả lời đúng thì gradingGuide phải nói rõ.
+        $previousText
 
-            Các môn khác:
-            - phải có tiêu chí chấm rõ ràng;
-            - không dùng thuật ngữ không phù hợp lớp học.
+        $qualityText
 
-            === ĐIỂM ===
-            Chính xác 3 câu, tổng 10 điểm.
-            Có thể dùng:
-            - 3 + 3 + 4
-            - 2 + 3 + 5
-            hoặc phân bố hợp lý khác.
-            Câu yêu cầu tư duy cao hơn có thể có nhiều điểm hơn.
+        === JSON OUTPUT ===
+        Chỉ trả về JSON hợp lệ:
 
-            === TỰ KIỂM TRA TRƯỚC KHI TRẢ ===
-            - Đúng 3 câu.
-            - ID là 1,2,3.
-            - Có learningObjective cho từng câu.
-            - LearningObjective không trùng nhau.
-            - Q1/Q2/Q3 khác nhau về tư duy.
-            - Q2 thực sự vận dụng.
-            - Q3 thực sự sâu hơn khi môn học cho phép.
-            - Tổng điểm = 10.
-            - Có đúng 3 answerKey.
-            - ID answerKey khớp question.
-            - Mỗi câu có đáp án.
-            - GradingGuide khớp câu hỏi.
-            - Không DRAWING/MIXED.
-            - AnswerType và GradingMethod tương thích.
-            - Không trùng nội dung.
-            - Không sai chính tả/ngữ nghĩa.
-            - Không kiến thức vượt lớp.
-            - JSON hợp lệ.
-            - Không có markdown hoặc text ngoài JSON.
-
-            $previousText
-
-            $qualityText
-
-            === JSON OUTPUT ===
-            Chỉ trả về JSON hợp lệ:
-
+        {
+          "title": "Tên bài",
+          "learningMaterial": null,
+          "questions": [
             {
-              "title": "Tên bài",
-              "questions": [
-                {
-                  "id": 1,
-                  "question": "...",
-                  "learningObjective": "...",
-                  "points": 3,
-                  "answerType": "TEXT",
-                  "gradingMethod": "AI_TEXT"
-                },
-                {
-                  "id": 2,
-                  "question": "...",
-                  "learningObjective": "...",
-                  "points": 3,
-                  "answerType": "HANDWRITING",
-                  "gradingMethod": "OCR_AI"
-                },
-                {
-                  "id": 3,
-                  "question": "...",
-                  "learningObjective": "...",
-                  "points": 4,
-                  "answerType": "HANDWRITING",
-                  "gradingMethod": "OCR_AI"
-                }
-              ],
-              "answerKey": [
-                {
-                  "id": 1,
-                  "answer": "..."
-                },
-                {
-                  "id": 2,
-                  "answer": "..."
-                },
-                {
-                  "id": 3,
-                  "answer": "..."
-                }
-              ],
-              "gradingGuide": "...",
-              "totalScore": 10
+              "id": 1,
+              "question": "...",
+              "learningObjective": "...",
+              "points": 3,
+              "answerType": "TEXT",
+              "gradingMethod": "AI_TEXT",
+              "sourceType": "SELF_CONTAINED"
+            },
+            {
+              "id": 2,
+              "question": "...",
+              "learningObjective": "...",
+              "points": 3,
+              "answerType": "HANDWRITING",
+              "gradingMethod": "OCR_AI",
+              "sourceType": "SELF_CONTAINED"
+            },
+            {
+              "id": 3,
+              "question": "...",
+              "learningObjective": "...",
+              "points": 4,
+              "answerType": "HANDWRITING",
+              "gradingMethod": "OCR_AI",
+              "sourceType": "SELF_CONTAINED"
             }
-        """.trimIndent()
+          ],
+          "answerKey": [
+            {
+              "id": 1,
+              "answer": "..."
+            },
+            {
+              "id": 2,
+              "answer": "..."
+            },
+            {
+              "id": 3,
+              "answer": "..."
+            }
+          ],
+          "gradingGuide": "...",
+          "totalScore": 10
+        }
+    """.trimIndent()
     }
 
-    // ============================================================
-    // PREVIOUS ASSIGNMENTS / SEMANTIC DIVERSITY
-    // ============================================================
+// ============================================================
+// SEX EDUCATION PROMPT
+// ============================================================
+
+    private fun buildSexEducationPrompt(
+        grade: Int,
+        subject: String,
+        topic: String?,
+        difficulty: Difficulty,
+        previousAssignments: List<String> = emptyList(),
+        qualityFeedback: String? = null
+    ): String {
+
+        val topicText = topic
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?: "nội dung phù hợp chương trình sức khỏe giới tính lớp $grade"
+
+        val blueprint = createSexEducationBlueprint(
+            grade = grade,
+            topic = topicText,
+            difficulty = difficulty
+        )
+
+        val previousText =
+            buildPreviousAssignmentsContext(previousAssignments)
+
+        val qualityText = qualityFeedback
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?.let {
+                """
+            === QUALITY FEEDBACK ===
+            $it
+
+            Phải sửa toàn bộ vấn đề được nêu.
+            """.trimIndent()
+            }
+            ?: ""
+
+        return """
+        Bạn là giáo viên Việt Nam thiết kế bài học giáo dục sức khỏe
+        giới tính/sức khỏe sinh sản phù hợp tuổi.
+
+        === THÔNG TIN ===
+        - Lớp: $grade
+        - Môn: $subject
+        - Chủ đề: $topicText
+
+        === PHẠM VI ĐƯỢC PHÉP ===
+        ${getSexEducationScope(grade)}
+
+        === ĐỘ KHÓ ===
+        ${getSexEducationDifficulty(difficulty)}
+
+        ${blueprintAsPrompt(blueprint)}
+
+        === MỤC TIÊU ===
+        Bài tập phải giúp học sinh:
+        - hiểu kiến thức khoa học;
+        - biết bảo vệ cơ thể;
+        - biết ranh giới cá nhân;
+        - biết quyền từ chối;
+        - biết nhận diện nguy cơ;
+        - biết cách tìm người lớn đáng tin cậy khi cần;
+        - biết bảo vệ quyền riêng tư trên Internet khi phù hợp.
+
+        === AN TOÀN ===
+        Tuyệt đối không:
+        - nội dung khiêu dâm;
+        - sexual roleplay;
+        - mô tả hành vi tình dục không cần thiết;
+        - hướng dẫn hoạt động tình dục;
+        - yêu cầu học sinh chia sẻ trải nghiệm cá nhân;
+        - hỏi về đời sống tình dục cá nhân;
+        - yêu cầu ảnh/video cơ thể;
+        - sexualize trẻ em;
+        - nội dung grooming;
+        - làm học sinh xấu hổ hoặc đổ lỗi.
+
+        Với học sinh nhỏ tuổi, tập trung:
+        - cơ thể;
+        - riêng tư;
+        - ranh giới;
+        - quyền nói không;
+        - an toàn;
+        - báo người lớn.
+
+        === DIVERSITY ===
+        Q1: hiểu kiến thức nền tảng.
+        Q2: vận dụng vào tình huống giáo dục.
+        Q3: phân tích/ra quyết định an toàn hoặc giải thích lý do.
+
+        Không được tạo ba câu chỉ khác từ ngữ.
+        Không được đổi tên nhân vật để giả tạo sự đa dạng.
+        Không được chỉ thay số.
+        Không được lặp cùng tình huống.
+        Không được yêu cầu học sinh tiết lộ trải nghiệm riêng tư.
+
+        === ANSWER TYPE ===
+        Ưu tiên:
+        - TEXT + AI_TEXT
+        - SPEECH_TO_TEXT + AI_TEXT
+
+        HANDWRITING + OCR_AI chỉ dùng khi thực sự có giá trị.
+
+        Không dùng:
+        - DRAWING
+        - MIXED
+
+        Không dùng EXACT cho câu hỏi mở.
+
+        === CHẤT LƯỢNG ===
+        Câu hỏi phải:
+        - có nghĩa;
+        - tự nhiên bằng tiếng Việt;
+        - không mơ hồ;
+        - đủ dữ kiện;
+        - có câu trả lời xác định hoặc tiêu chí chấm;
+        - phù hợp tuổi;
+        - không chứa từ vô nghĩa;
+        - không có placeholder.
+
+        === QUY TẮC VỀ NGUỒN NỘI DUNG ===
+
+        Mỗi câu hỏi phải có sourceType:
+
+        1. SELF_CONTAINED
+        - Câu hỏi tự chứa đầy đủ thông tin cần thiết.
+
+        2. LESSON_CONTENT
+        - Dựa trên nội dung bài học.
+        - Nếu cần đọc nội dung bài học để trả lời,
+          phải cung cấp trong learningMaterial.
+
+        3. READING_PASSAGE
+        - Câu hỏi đọc hiểu.
+        - BẮT BUỘC có learningMaterial chứa đầy đủ bài đọc.
+
+        QUY TẮC BẮT BUỘC:
+        - Nếu bất kỳ câu nào có sourceType = LESSON_CONTENT
+          hoặc READING_PASSAGE thì learningMaterial không được null/rỗng.
+        - Không viết "Đọc đoạn văn trên...", "Dựa vào bài học trên...",
+          "Theo nội dung trên...", "Theo bảng trên..."
+          nếu nội dung không nằm trong learningMaterial.
+        - Không yêu cầu học sinh tự tìm Internet, sách giáo khoa
+          hoặc nguồn ngoài.
+        - Nếu nhiều câu cùng sử dụng một bài đọc,
+          đặt toàn bộ bài đọc trong learningMaterial.
+        - learningMaterial phải thực sự liên quan.
+        - Không tạo learningMaterial chỉ để đối phó validator.
+        - Ưu tiên SELF_CONTAINED nếu câu hỏi đã đủ dữ kiện.
+
+        $previousText
+
+        $qualityText
+
+        === JSON OUTPUT ===
+        Chỉ trả về JSON hợp lệ:
+
+        {
+          "title": "Tên bài",
+          "learningMaterial": null,
+          "questions": [
+            {
+              "id": 1,
+              "question": "...",
+              "learningObjective": "...",
+              "points": 3,
+              "answerType": "TEXT",
+              "gradingMethod": "AI_TEXT",
+              "sourceType": "SELF_CONTAINED"
+            },
+            {
+              "id": 2,
+              "question": "...",
+              "learningObjective": "...",
+              "points": 3,
+              "answerType": "TEXT",
+              "gradingMethod": "AI_TEXT",
+              "sourceType": "SELF_CONTAINED"
+            },
+            {
+              "id": 3,
+              "question": "...",
+              "learningObjective": "...",
+              "points": 4,
+              "answerType": "TEXT",
+              "gradingMethod": "AI_TEXT",
+              "sourceType": "SELF_CONTAINED"
+            }
+          ],
+          "answerKey": [
+            {
+              "id": 1,
+              "answer": "..."
+            },
+            {
+              "id": 2,
+              "answer": "..."
+            },
+            {
+              "id": 3,
+              "answer": "..."
+            }
+          ],
+          "gradingGuide": "...",
+          "totalScore": 10
+        }
+
+        Bắt buộc:
+        - đúng 3 câu;
+        - ID 1,2,3;
+        - có learningObjective;
+        - đúng 3 answerKey;
+        - tổng điểm 10;
+        - totalScore = 10;
+        - answerType/gradingMethod tương thích;
+        - không DRAWING/MIXED;
+        - không có nội dung không phù hợp tuổi.
+    """.trimIndent()
+    }
+
+    private fun getSexEducationScope(grade: Int): String {
+
+        return when (grade) {
+
+            in 1..3 -> """
+            - Cơ thể và các bộ phận cơ thể.
+            - Riêng tư.
+            - Ranh giới cá nhân.
+            - Quyền nói không.
+            - An toàn và báo người lớn đáng tin cậy.
+            - Không đi sâu vào hoạt động tình dục.
+        """.trimIndent()
+
+            in 4..5 -> """
+            - Thay đổi cơ thể ở tuổi dậy thì.
+            - Vệ sinh cơ thể.
+            - Kinh nguyệt ở mức cơ bản.
+            - Cảm xúc và ranh giới.
+            - An toàn trên Internet.
+            - Nhận diện hành vi không phù hợp.
+        """.trimIndent()
+
+            in 6..7 -> """
+            - Dậy thì.
+            - Thay đổi thể chất và tâm lý.
+            - Kinh nguyệt.
+            - Đồng thuận và ranh giới.
+            - Quan hệ lành mạnh.
+            - An toàn hình ảnh và Internet.
+            - Nhận diện hành vi không phù hợp.
+            - Tìm người hỗ trợ.
+        """.trimIndent()
+
+            in 8..9 -> """
+            - Sức khỏe sinh sản.
+            - Hormone và thay đổi cơ thể.
+            - Sức khỏe nam/nữ.
+            - Kinh nguyệt.
+            - Đồng thuận.
+            - Quan hệ lành mạnh.
+            - Phòng ngừa STI ở mức khoa học.
+            - Phòng tránh mang thai ở mức giáo dục.
+            - An toàn Internet.
+            - Tìm hỗ trợ.
+        """.trimIndent()
+
+            else -> """
+            - Sức khỏe sinh sản.
+            - Sinh sản ở mức khoa học.
+            - Sức khỏe tình dục có trách nhiệm.
+            - Đồng thuận và ranh giới.
+            - Quan hệ lành mạnh.
+            - Kiến thức khoa học về tránh thai.
+            - Phòng ngừa STI.
+            - Sức khỏe thể chất và tinh thần.
+            - Quyền riêng tư và Internet.
+            - Phòng chống xâm hại.
+            - Tìm hỗ trợ y tế/chuyên môn.
+        """.trimIndent()
+        }
+    }
+
+    private fun getSexEducationDifficulty(
+        difficulty: Difficulty
+    ): String {
+
+        return when (difficulty) {
+
+            Difficulty.EASY ->
+                "Kiến thức cơ bản, nhận biết và hiểu. Không yêu cầu reasoning phức tạp."
+
+            Difficulty.MEDIUM ->
+                "Hiểu và vận dụng trong tình huống giáo dục. Có thể giải thích lý do hoặc chọn hành động an toàn."
+
+            Difficulty.HARD ->
+                "Vận dụng và phân tích tình huống, nhận diện nguy cơ, quyết định an toàn và giải thích lý do; luôn phù hợp độ tuổi."
+        }
+    }
+
+// ============================================================
+// PREVIOUS ASSIGNMENTS
+// ============================================================
 
     private fun buildPreviousAssignmentsContext(
         previousAssignments: List<String>
@@ -750,9 +1091,9 @@ class AIService {
 
         if (previousAssignments.isEmpty()) {
             return """
-                === BÀI ĐÃ TẠO TRƯỚC ===
-                Không có dữ liệu bài trước.
-            """.trimIndent()
+            === BÀI ĐÃ TẠO TRƯỚC ===
+            Không có dữ liệu bài trước.
+        """.trimIndent()
         }
 
         val limited = previousAssignments
@@ -760,10 +1101,11 @@ class AIService {
             .takeLast(12)
 
         return buildString {
+
             appendLine("=== BÀI ĐÃ TẠO TRƯỚC ===")
             appendLine(
                 "Có ${limited.size} bài trước. " +
-                        "Phải tránh trùng về ý tưởng, context, strategy và cách giải."
+                        "Phải tránh trùng ý tưởng, context, strategy và cách giải."
             )
 
             limited.forEachIndexed { index, assignment ->
@@ -776,29 +1118,29 @@ class AIService {
             appendLine("=== SEMANTIC ANTI-REPETITION ===")
             appendLine(
                 """
-                Trước khi tạo từng câu, hãy tự hỏi:
-                1. Câu này có đang kiểm tra đúng ý tưởng của bài trước không?
-                2. Nếu thay tên và số liệu, nó có trở thành cùng một câu không?
-                3. Cách giải có giống bài trước không?
-                4. Context có bị lặp không?
-                5. Có thể kiểm tra cùng kiến thức bằng một tình huống khác sâu hơn không?
+            Trước khi tạo từng câu, hãy tự hỏi:
+            1. Có đang kiểm tra cùng ý tưởng với bài trước không?
+            2. Nếu đổi tên và số liệu, có thành cùng một câu không?
+            3. Cách giải có giống bài trước không?
+            4. Context có bị lặp không?
+            5. Có thể kiểm tra cùng kiến thức bằng tình huống khác không?
 
-                Nếu câu quá giống một bài trước:
-                - bỏ câu đó;
-                - chọn context mới;
-                - thay đổi reasoning;
-                - thay đổi question strategy;
-                - hoặc thay đổi kỹ năng được kiểm tra.
+            Nếu quá giống:
+            - bỏ câu;
+            - chọn context mới;
+            - thay reasoning;
+            - thay strategy;
+            - hoặc thay kỹ năng.
 
-                Không được coi "đổi số" là sự đa dạng thực sự.
-                """.trimIndent()
+            Không coi "đổi số" là diversity thực sự.
+            """.trimIndent()
             )
         }
     }
 
-    // ============================================================
-    // RETRY
-    // ============================================================
+// ============================================================
+// RETRY
+// ============================================================
 
     private suspend fun callGeminiWithRetry(
         prompt: String,
@@ -840,12 +1182,14 @@ class AIService {
         for ((modelIndex, selectedModel) in models.withIndex()) {
 
             println(
-                "[AIService] Gemini model=${selectedModel} " +
+                "[AIService] Gemini model=$selectedModel " +
                         "modelIndex=$modelIndex"
             )
 
             for (attempt in 1..3) {
+
                 try {
+
                     println(
                         "[AIService] Gemini attempt=$attempt/3 " +
                                 "model=$selectedModel"
@@ -860,13 +1204,8 @@ class AIService {
                     )
 
                 } catch (e: GeminiRetryException) {
-                    lastError = e
 
-                    println(
-                        "[AIService] Retryable Gemini error " +
-                                "attempt=$attempt model=$selectedModel " +
-                                "message=${e.message}"
-                    )
+                    lastError = e
 
                     if (attempt < 3) {
                         delay(
@@ -879,12 +1218,8 @@ class AIService {
                     }
 
                 } catch (e: SocketTimeoutException) {
-                    lastError = e
 
-                    println(
-                        "[AIService] Gemini timeout " +
-                                "attempt=$attempt model=$selectedModel"
-                    )
+                    lastError = e
 
                     if (attempt < 3) {
                         delay(
@@ -897,12 +1232,8 @@ class AIService {
                     }
 
                 } catch (e: ConnectException) {
-                    lastError = e
 
-                    println(
-                        "[AIService] Gemini connection error " +
-                                "attempt=$attempt model=$selectedModel"
-                    )
+                    lastError = e
 
                     if (attempt < 3) {
                         delay(
@@ -920,8 +1251,7 @@ class AIService {
             }
 
             println(
-                "[AIService] Primary model exhausted, " +
-                        "switching if fallback exists."
+                "[AIService] Model exhausted, switching if fallback exists."
             )
         }
 
@@ -930,9 +1260,9 @@ class AIService {
         )
     }
 
-    // ============================================================
-    // GEMINI HTTP
-    // ============================================================
+// ============================================================
+// GEMINI HTTP
+// ============================================================
 
     private fun callGemini(
         prompt: String,
@@ -947,17 +1277,21 @@ class AIService {
                     "$selectedModel:generateContent?key=$key"
         )
 
-        val connection = url.openConnection() as HttpURLConnection
+        val connection =
+            url.openConnection() as HttpURLConnection
 
         try {
+
             connection.requestMethod = "POST"
             connection.connectTimeout = 20_000
             connection.readTimeout = 180_000
             connection.doOutput = true
+
             connection.setRequestProperty(
                 "Content-Type",
                 "application/json"
             )
+
             connection.setRequestProperty(
                 "Accept",
                 "application/json"
@@ -1025,24 +1359,26 @@ class AIService {
                 }
             }
 
-            val body = requestBody.toString()
-
             connection.outputStream.use { output ->
-                output.write(body.toByteArray(Charsets.UTF_8))
+                output.write(
+                    requestBody.toString()
+                        .toByteArray(Charsets.UTF_8)
+                )
             }
 
             val responseCode = connection.responseCode
 
-            val responseText = if (responseCode in 200..299) {
-                connection.inputStream
-                    .bufferedReader()
-                    .use { it.readText() }
-            } else {
-                connection.errorStream
-                    ?.bufferedReader()
-                    ?.use { it.readText() }
-                    ?: ""
-            }
+            val responseText =
+                if (responseCode in 200..299) {
+                    connection.inputStream
+                        .bufferedReader()
+                        .use { it.readText() }
+                } else {
+                    connection.errorStream
+                        ?.bufferedReader()
+                        ?.use { it.readText() }
+                        ?: ""
+                }
 
             if (responseCode in 200..299) {
                 return responseText
@@ -1075,382 +1411,70 @@ class AIService {
         message: String
     ) : Exception(message)
 
-    // ============================================================
-    // SEX EDUCATION
-    // ============================================================
+// ============================================================
+// SEX EDUCATION SYSTEM
+// ============================================================
 
     private fun buildSexEducationSystemInstruction(): String {
         return """
-            Bạn là hệ thống AI hỗ trợ giáo dục sức khỏe giới tính và sức khỏe sinh sản
-            cho học sinh.
+        Bạn là hệ thống AI hỗ trợ giáo dục sức khỏe giới tính
+        và sức khỏe sinh sản cho học sinh.
 
-            Nội dung phải:
-            - khoa học;
-            - chính xác;
-            - giáo dục;
-            - phù hợp độ tuổi;
-            - không kích thích tình dục;
-            - không mang tính khiêu dâm;
-            - không mô tả tình dục không cần thiết;
-            - không sexual roleplay;
-            - không yêu cầu trẻ em mô tả trải nghiệm riêng tư;
-            - không yêu cầu chia sẻ ảnh/video riêng tư;
-            - không hướng dẫn hành vi tình dục;
-            - không bình thường hóa hành vi grooming hoặc xâm hại;
-            - không làm học sinh xấu hổ;
-            - ưu tiên an toàn, ranh giới cá nhân, quyền từ chối và tìm người lớn đáng tin cậy.
+        Nội dung phải:
+        - khoa học;
+        - chính xác;
+        - giáo dục;
+        - phù hợp độ tuổi;
+        - không kích thích tình dục;
+        - không khiêu dâm;
+        - không mô tả tình dục không cần thiết;
+        - không sexual roleplay;
+        - không yêu cầu trẻ em mô tả trải nghiệm riêng tư;
+        - không yêu cầu ảnh/video riêng tư;
+        - không hướng dẫn hành vi tình dục;
+        - không bình thường hóa grooming hoặc xâm hại;
+        - không làm học sinh xấu hổ;
+        - ưu tiên an toàn, ranh giới cá nhân, quyền từ chối
+          và tìm người lớn đáng tin cậy.
 
-            Khi nội dung vượt quá độ tuổi:
-            - chuyển về kiến thức khoa học;
-            - an toàn;
-            - quyền riêng tư;
-            - sức khỏe;
-            - hoặc tìm người lớn/chuyên gia y tế đáng tin cậy.
-
-            Không suy đoán trải nghiệm cá nhân của học sinh.
-        """.trimIndent()
+        Không suy đoán trải nghiệm cá nhân của học sinh.
+    """.trimIndent()
     }
 
     private fun buildSexEducationSafetySettings(): JsonArray {
         return buildJsonArray {
-            add(
-                buildJsonObject {
-                    put("category", "HARM_CATEGORY_SEXUALLY_EXPLICIT")
-                    put("threshold", "BLOCK_LOW_AND_ABOVE")
-                }
-            )
 
             add(
                 buildJsonObject {
-                    put("category", "HARM_CATEGORY_DANGEROUS_CONTENT")
-                    put("threshold", "BLOCK_LOW_AND_ABOVE")
+                    put(
+                        "category",
+                        "HARM_CATEGORY_SEXUALLY_EXPLICIT"
+                    )
+                    put(
+                        "threshold",
+                        "BLOCK_LOW_AND_ABOVE"
+                    )
+                }
+            )
+
+            add(
+                buildJsonObject {
+                    put(
+                        "category",
+                        "HARM_CATEGORY_DANGEROUS_CONTENT"
+                    )
+                    put(
+                        "threshold",
+                        "BLOCK_LOW_AND_ABOVE"
+                    )
                 }
             )
         }
     }
 
-    private fun getSexEducationScope(grade: Int): String {
-        return when (grade) {
-            in 1..3 -> """
-                - Nhận biết cơ thể và quyền riêng tư cơ bản.
-                - Khu vực riêng tư của cơ thể.
-                - Không ai được chạm vào cơ thể mình nếu mình không đồng ý,
-                  ngoại trừ tình huống chăm sóc y tế phù hợp.
-                - Biết nói không, tránh xa và báo người lớn đáng tin cậy.
-                - Vệ sinh cơ thể.
-                - Không yêu cầu kiến thức về hoạt động tình dục.
-            """.trimIndent()
-
-            in 4..5 -> """
-                - Những thay đổi cơ thể cơ bản khi lớn lên.
-                - Vệ sinh cá nhân và tuổi dậy thì ở mức phù hợp.
-                - Kinh nguyệt ở mức giáo dục cơ bản.
-                - Cảm xúc và sự tôn trọng cơ thể.
-                - Ranh giới cá nhân.
-                - Quyền từ chối.
-                - An toàn trên Internet và quyền riêng tư.
-            """.trimIndent()
-
-            in 6..7 -> """
-                - Tuổi dậy thì.
-                - Thay đổi thể chất, tâm lý và cảm xúc.
-                - Vệ sinh và chăm sóc sức khỏe.
-                - Kinh nguyệt.
-                - Ranh giới cá nhân và sự đồng thuận.
-                - Tôn trọng cơ thể.
-                - Quan hệ lành mạnh phù hợp tuổi.
-                - An toàn hình ảnh và Internet.
-                - Nhận biết hành vi không phù hợp và tìm trợ giúp.
-            """.trimIndent()
-
-            in 8..9 -> """
-                - Sức khỏe sinh sản.
-                - Tuổi dậy thì và hormone.
-                - Sức khỏe sinh sản nam/nữ.
-                - Kinh nguyệt.
-                - Đồng thuận và ranh giới.
-                - Quan hệ lành mạnh và trách nhiệm.
-                - Phòng ngừa STI ở mức khoa học.
-                - Phòng ngừa mang thai ngoài ý muốn ở mức giáo dục.
-                - An toàn Internet và nguy cơ xâm hại.
-                - Tìm sự hỗ trợ từ người lớn/chuyên gia y tế.
-            """.trimIndent()
-
-            else -> """
-                - Sức khỏe sinh sản.
-                - Kiến thức khoa học về sinh sản.
-                - Sức khỏe tình dục có trách nhiệm.
-                - Đồng thuận.
-                - Ranh giới cá nhân.
-                - Quan hệ lành mạnh.
-                - Trách nhiệm.
-                - Biện pháp tránh thai ở mức giáo dục khoa học.
-                - Phòng ngừa STI.
-                - Sức khỏe thể chất và tinh thần.
-                - Quyền riêng tư và an toàn Internet.
-                - Phòng ngừa xâm hại.
-                - Tìm hỗ trợ y tế/chuyên gia khi cần.
-            """.trimIndent()
-        }
-    }
-
-    private fun getSexEducationDifficulty(
-        difficulty: Difficulty
-    ): String {
-        return when (difficulty) {
-            Difficulty.EASY -> """
-                Kiến thức cơ bản, nhận biết và hiểu.
-                Không yêu cầu suy luận phức tạp.
-                Không tạo áp lực tâm lý.
-            """.trimIndent()
-
-            Difficulty.MEDIUM -> """
-                Hiểu và vận dụng.
-                Có thể sử dụng tình huống giáo dục.
-                Học sinh giải thích lý do hoặc lựa chọn cách xử lý an toàn.
-            """.trimIndent()
-
-            Difficulty.HARD -> """
-                Vận dụng và phân tích tình huống.
-                Có thể yêu cầu nhận diện rủi ro, lựa chọn cách xử lý an toàn
-                và giải thích quyết định.
-                Không sử dụng nội dung vượt độ tuổi hoặc mang tính kích thích.
-            """.trimIndent()
-        }
-    }
-
-    // ============================================================
-    // SEX EDUCATION PROMPT V2
-    // ============================================================
-
-    private fun buildSexEducationPrompt(
-        grade: Int,
-        subject: String,
-        topic: String?,
-        difficulty: Difficulty,
-        previousAssignments: List<String> = emptyList(),
-        qualityFeedback: String? = null
-    ): String {
-
-        val topicText = topic
-            ?.trim()
-            ?.takeIf { it.isNotBlank() }
-            ?: "nội dung phù hợp chương trình sức khỏe giới tính lớp $grade"
-
-        val blueprint = createSexEducationBlueprint(
-            grade = grade,
-            topic = topicText,
-            difficulty = difficulty
-        )
-
-        val previousText = buildPreviousAssignmentsContext(
-            previousAssignments
-        )
-
-        val qualityText = qualityFeedback
-            ?.trim()
-            ?.takeIf { it.isNotBlank() }
-            ?.let {
-                """
-                === QUALITY FEEDBACK ===
-                $it
-
-                Phải sửa toàn bộ vấn đề được nêu.
-                """.trimIndent()
-            }
-            ?: ""
-
-        return """
-            Bạn là giáo viên Việt Nam thiết kế bài học giáo dục sức khỏe
-            giới tính/sức khỏe sinh sản phù hợp tuổi.
-
-            === THÔNG TIN ===
-            - Lớp: $grade
-            - Môn: $subject
-            - Chủ đề: $topicText
-            - Độ khó: $difficulty
-
-            === PHẠM VI ĐƯỢC PHÉP ===
-            ${getSexEducationScope(grade)}
-
-            === ĐỘ KHÓ ===
-            ${getSexEducationDifficulty(difficulty)}
-
-            ${blueprintAsPrompt(blueprint)}
-
-            === MỤC TIÊU ===
-            Bài tập phải giúp học sinh:
-            - hiểu kiến thức khoa học;
-            - biết bảo vệ cơ thể;
-            - biết ranh giới cá nhân;
-            - biết quyền từ chối;
-            - biết nhận diện nguy cơ;
-            - biết cách tìm người lớn đáng tin cậy khi cần;
-            - biết bảo vệ quyền riêng tư trên Internet khi phù hợp.
-
-            === AN TOÀN ===
-            Tuyệt đối không:
-            - nội dung khiêu dâm;
-            - sexual roleplay;
-            - mô tả hành vi tình dục không cần thiết;
-            - hướng dẫn hoạt động tình dục;
-            - yêu cầu học sinh chia sẻ trải nghiệm cá nhân;
-            - hỏi về đời sống tình dục cá nhân;
-            - yêu cầu ảnh/video cơ thể;
-            - sexualize trẻ em;
-            - nội dung grooming;
-            - làm học sinh xấu hổ hoặc đổ lỗi.
-
-            Với học sinh nhỏ tuổi, tập trung:
-            - cơ thể;
-            - riêng tư;
-            - ranh giới;
-            - quyền nói không;
-            - an toàn;
-            - báo người lớn.
-
-            === DIVERSITY ===
-            Q1: hiểu kiến thức nền tảng.
-            Q2: vận dụng vào tình huống giáo dục.
-            Q3: phân tích/ra quyết định an toàn hoặc giải thích lý do.
-
-            Không được tạo ba câu chỉ khác từ ngữ.
-            Không được đổi tên nhân vật để giả tạo sự đa dạng.
-            Không được chỉ thay số.
-            Không được lặp cùng tình huống.
-            Không được yêu cầu học sinh tiết lộ trải nghiệm riêng tư.
-
-            === ANSWER TYPE ===
-            Ưu tiên:
-            - TEXT + AI_TEXT
-            - SPEECH_TO_TEXT + AI_TEXT
-
-            HANDWRITING + OCR_AI chỉ dùng khi thực sự có giá trị.
-
-            Không dùng:
-            - DRAWING
-            - MIXED
-
-            Không dùng EXACT cho câu hỏi mở về kiến thức/giải thích.
-
-            === CHẤT LƯỢNG ===
-            Câu hỏi phải:
-            - có nghĩa;
-            - tự nhiên bằng tiếng Việt;
-            - không mơ hồ;
-            - đủ dữ kiện;
-            - có câu trả lời xác định hoặc tiêu chí chấm xác định;
-            - phù hợp tuổi;
-            - không chứa từ vô nghĩa;
-            - không có lỗi ngữ nghĩa;
-            - không có placeholder.
-
-            $previousText
-
-            $qualityText
-
-            === JSON OUTPUT ===
-            Chỉ trả về JSON hợp lệ, không markdown:
-
-            {
-              "title": "Tên bài",
-              "questions": [
-                {
-                  "id": 1,
-                  "question": "...",
-                  "learningObjective": "...",
-                  "points": 3,
-                  "answerType": "TEXT",
-                  "gradingMethod": "AI_TEXT"
-                },
-                {
-                  "id": 2,
-                  "question": "...",
-                  "learningObjective": "...",
-                  "points": 3,
-                  "answerType": "TEXT",
-                  "gradingMethod": "AI_TEXT"
-                },
-                {
-                  "id": 3,
-                  "question": "...",
-                  "learningObjective": "...",
-                  "points": 4,
-                  "answerType": "TEXT",
-                  "gradingMethod": "AI_TEXT"
-                }
-              ],
-              "answerKey": [
-                {
-                  "id": 1,
-                  "answer": "..."
-                },
-                {
-                  "id": 2,
-                  "answer": "..."
-                },
-                {
-                  "id": 3,
-                  "answer": "..."
-                }
-              ],
-              "gradingGuide": "...",
-              "totalScore": 10
-            }
-
-            Bắt buộc:
-            - đúng 3 câu;
-            - ID 1,2,3;
-            - có learningObjective;
-            - đúng 3 answerKey;
-            - tổng điểm 10;
-            - totalScore = 10;
-            - answerType/gradingMethod tương thích;
-            - không DRAWING/MIXED;
-            - không có nội dung không phù hợp tuổi.
-        """.trimIndent()
-    }
-
-    private fun createSexEducationBlueprint(
-        grade: Int,
-        topic: String,
-        difficulty: Difficulty
-    ): GenerationBlueprint {
-
-        return GenerationBlueprint(
-            subject = "SEX_EDUCATION",
-            grade = grade,
-            topic = topic,
-            difficulty = difficulty,
-            questions = listOf(
-                BlueprintQuestion(
-                    1,
-                    CognitiveLevel.UNDERSTAND,
-                    QuestionStrategy.DIRECT,
-                    "Hiểu một kiến thức sức khỏe cơ bản.",
-                    "Không hỏi trải nghiệm cá nhân."
-                ),
-                BlueprintQuestion(
-                    2,
-                    CognitiveLevel.APPLY,
-                    QuestionStrategy.DECISION,
-                    "Áp dụng kiến thức để chọn hành động an toàn trong tình huống giáo dục.",
-                    "Không yêu cầu chia sẻ thông tin riêng tư."
-                ),
-                BlueprintQuestion(
-                    3,
-                    CognitiveLevel.REASON,
-                    QuestionStrategy.CAUSE_EFFECT,
-                    "Giải thích vì sao một lựa chọn an toàn phù hợp hoặc phân tích nguy cơ.",
-                    "Không mô tả nội dung tình dục không cần thiết."
-                )
-            )
-        )
-    }
-
-    // ============================================================
-    // PARSE RESPONSE
-    // ============================================================
+// ============================================================
+// PARSE GEMINI RESPONSE
+// ============================================================
 
     private fun parseResponse(
         responseText: String
@@ -1460,69 +1484,85 @@ class AIService {
             responseText = responseText
         )
 
-        val title = root
-            .jsonObject["title"]
+        val obj = root.jsonObject
+
+        val title = obj["title"]
             ?.jsonPrimitive
             ?.contentOrNull
             ?.trim()
             ?.takeIf { it.isNotBlank() }
             ?: "Bài tập"
 
-        val questionsElement = root
-            .jsonObject["questions"]
-            ?: throw IllegalStateException(
-                "Gemini response missing questions"
-            )
+        val learningMaterial = obj["learningMaterial"]
+            ?.jsonPrimitive
+            ?.contentOrNull
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+
+        val questionsElement =
+            obj["questions"]
+                ?: throw IllegalStateException(
+                    "Gemini response missing questions"
+                )
 
         val questions = questionsElement
             .jsonArray
             .map { element ->
 
-                val obj = element.jsonObject
+                val q = element.jsonObject
 
-                val id = obj["id"]
+                val id = q["id"]
                     ?.jsonPrimitive
                     ?.intOrNull
                     ?: throw IllegalStateException(
-                        "Question ID is missing"
+                        "Question missing id"
                     )
 
-                val question = obj["question"]
+                val question = q["question"]
                     ?.jsonPrimitive
                     ?.contentOrNull
                     ?.trim()
                     ?: throw IllegalStateException(
-                        "Question $id text is missing"
+                        "Question $id missing question"
                     )
 
-                val learningObjective = obj["learningObjective"]
-                    ?.jsonPrimitive
-                    ?.contentOrNull
-                    ?.trim()
-                    ?: throw IllegalStateException(
-                        "Question $id learningObjective is missing"
-                    )
+                val learningObjective =
+                    q["learningObjective"]
+                        ?.jsonPrimitive
+                        ?.contentOrNull
+                        ?.trim()
+                        ?: throw IllegalStateException(
+                            "Question $id missing learningObjective"
+                        )
 
-                val points = obj["points"]
+                val points = q["points"]
                     ?.jsonPrimitive
                     ?.doubleOrNull
                     ?: throw IllegalStateException(
-                        "Question $id points is missing"
+                        "Question $id missing points"
                     )
 
-                val answerTypeText = obj["answerType"]
-                    ?.jsonPrimitive
-                    ?.contentOrNull
-                    ?: throw IllegalStateException(
-                        "Question $id answerType is missing"
-                    )
+                val answerTypeText =
+                    q["answerType"]
+                        ?.jsonPrimitive
+                        ?.contentOrNull
+                        ?: throw IllegalStateException(
+                            "Question $id missing answerType"
+                        )
 
-                val gradingMethodText = obj["gradingMethod"]
-                    ?.jsonPrimitive
-                    ?.contentOrNull
-                    ?: throw IllegalStateException(
-                        "Question $id gradingMethod is missing"
-                    )
+                val gradingMethodText =
+                    q["gradingMethod"]
+                        ?.jsonPrimitive
+                        ?.contentOrNull
+                        ?: throw IllegalStateException(
+                            "Question $id missing gradingMethod"
+                        )
+
+                val sourceTypeText =
+                    q["sourceType"]
+                        ?.jsonPrimitive
+                        ?.contentOrNull
+                        ?: "SELF_CONTAINED"
 
                 val answerType = try {
                     AnswerType.valueOf(
@@ -1530,7 +1570,8 @@ class AIService {
                     )
                 } catch (e: Exception) {
                     throw IllegalStateException(
-                        "Question $id has invalid answerType: $answerTypeText"
+                        "Question $id has invalid answerType: " +
+                                answerTypeText
                     )
                 }
 
@@ -1540,7 +1581,19 @@ class AIService {
                     )
                 } catch (e: Exception) {
                     throw IllegalStateException(
-                        "Question $id has invalid gradingMethod: $gradingMethodText"
+                        "Question $id has invalid gradingMethod: " +
+                                gradingMethodText
+                    )
+                }
+
+                val sourceType = try {
+                    QuestionSourceType.valueOf(
+                        sourceTypeText.trim().uppercase()
+                    )
+                } catch (e: Exception) {
+                    throw IllegalStateException(
+                        "Question $id has invalid sourceType: " +
+                                sourceTypeText
                     )
                 }
 
@@ -1555,47 +1608,36 @@ class AIService {
                     learningObjective = learningObjective,
                     points = points,
                     answerType = answerType,
-                    gradingMethod = gradingMethod
+                    gradingMethod = gradingMethod,
+                    sourceType = sourceType
                 )
             }
 
-        if (questions.size != 3) {
-            throw IllegalStateException(
-                "Assignment must contain exactly 3 questions, found ${questions.size}"
-            )
-        }
-
-        if (questions.map { it.id } != listOf(1, 2, 3)) {
-            throw IllegalStateException(
-                "Question IDs must be exactly [1, 2, 3], found ${questions.map { it.id }}"
-            )
-        }
-
-        val answerKeyElement = root
-            .jsonObject["answerKey"]
-            ?: throw IllegalStateException(
-                "Gemini response missing answerKey"
-            )
+        val answerKeyElement =
+            obj["answerKey"]
+                ?: throw IllegalStateException(
+                    "Gemini response missing answerKey"
+                )
 
         val answerKey = answerKeyElement
             .jsonArray
             .map { element ->
 
-                val obj = element.jsonObject
+                val answerObject = element.jsonObject
 
-                val id = obj["id"]
+                val id = answerObject["id"]
                     ?.jsonPrimitive
                     ?.intOrNull
                     ?: throw IllegalStateException(
-                        "Answer ID is missing"
+                        "Answer missing id"
                     )
 
-                val answer = obj["answer"]
+                val answer = answerObject["answer"]
                     ?.jsonPrimitive
                     ?.contentOrNull
                     ?.trim()
                     ?: throw IllegalStateException(
-                        "Answer $id is missing"
+                        "Answer $id missing answer"
                     )
 
                 GeneratedAnswer(
@@ -1604,62 +1646,24 @@ class AIService {
                 )
             }
 
-        if (answerKey.size != 3) {
-            throw IllegalStateException(
-                "Answer key must contain exactly 3 answers"
-            )
-        }
-
-        if (answerKey.map { it.id } != listOf(1, 2, 3)) {
-            throw IllegalStateException(
-                "Answer IDs must be exactly [1,2,3]"
-            )
-        }
-
-        if (questions.map { it.id }.toSet() != answerKey.map { it.id }.toSet()) {
-            throw IllegalStateException(
-                "Question IDs and answer IDs do not match"
-            )
-        }
-
-        val gradingGuide = root
-            .jsonObject["gradingGuide"]
+        val gradingGuide = obj["gradingGuide"]
             ?.jsonPrimitive
             ?.contentOrNull
             ?.trim()
-            ?: ""
+            ?: throw IllegalStateException(
+                "Gemini response missing gradingGuide"
+            )
 
-        val totalScore = root
-            .jsonObject["totalScore"]
+        val totalScore = obj["totalScore"]
             ?.jsonPrimitive
             ?.doubleOrNull
-            ?: 10.0
-
-        if (!totalScore.isFinite()) {
-            throw IllegalStateException(
-                "totalScore is not finite"
+            ?: throw IllegalStateException(
+                "Gemini response missing totalScore"
             )
-        }
-
-        val calculatedScore = questions.sumOf { it.points }
-
-        if (
-            !calculatedScore.isFinite() ||
-            abs(calculatedScore - totalScore) > 0.001
-        ) {
-            throw IllegalStateException(
-                "Question points ($calculatedScore) do not match totalScore ($totalScore)"
-            )
-        }
-
-        if (abs(totalScore - 10.0) > 0.001) {
-            throw IllegalStateException(
-                "totalScore must be exactly 10, actual=$totalScore"
-            )
-        }
 
         return GeneratedAssignment(
             title = title,
+            learningMaterial = learningMaterial,
             questions = questions,
             answerKey = answerKey,
             gradingGuide = gradingGuide,
@@ -1671,84 +1675,66 @@ class AIService {
         responseText: String
     ): JsonElement {
 
-        val responseRoot = try {
-            json.parseToJsonElement(responseText).jsonObject
-        } catch (e: Exception) {
-            throw IllegalStateException(
-                "Invalid Gemini HTTP JSON response",
-                e
-            )
-        }
+        val root = json.parseToJsonElement(responseText)
 
-        val candidateText = responseRoot["candidates"]
-            ?.jsonArray
-            ?.firstOrNull()
-            ?.jsonObject
-            ?.get("content")
-            ?.jsonObject
-            ?.get("parts")
-            ?.jsonArray
-            ?.firstOrNull()
-            ?.jsonObject
-            ?.get("text")
-            ?.jsonPrimitive
-            ?.contentOrNull
-            ?: throw IllegalStateException(
-                "Gemini response does not contain candidate text"
-            )
+        val candidateText =
+            root.jsonObject["candidates"]
+                ?.jsonArray
+                ?.firstOrNull()
+                ?.jsonObject
+                ?.get("content")
+                ?.jsonObject
+                ?.get("parts")
+                ?.jsonArray
+                ?.firstOrNull()
+                ?.jsonObject
+                ?.get("text")
+                ?.jsonPrimitive
+                ?.contentOrNull
 
-        val cleaned = cleanJsonText(candidateText)
+        val raw = candidateText ?: responseText
 
-        return try {
-            json.parseToJsonElement(cleaned)
-        } catch (e: Exception) {
-            throw IllegalStateException(
-                "Gemini returned invalid assignment JSON: " +
-                        cleaned.take(1000),
-                e
-            )
-        }
+        return json.parseToJsonElement(
+            cleanJsonText(raw)
+        )
     }
 
     private fun cleanJsonText(
         text: String
     ): String {
 
-        var cleaned = text.trim()
+        var result = text.trim()
 
-        if (cleaned.startsWith("```")) {
-            cleaned = cleaned
+        if (result.startsWith("```")) {
+            result = result
                 .removePrefix("```json")
                 .removePrefix("```JSON")
                 .removePrefix("```")
                 .trim()
 
-            if (cleaned.endsWith("```")) {
-                cleaned = cleaned
+            if (result.endsWith("```")) {
+                result = result
                     .removeSuffix("```")
                     .trim()
             }
         }
 
-        val firstBrace = cleaned.indexOf('{')
-        val lastBrace = cleaned.lastIndexOf('}')
+        val firstBrace = result.indexOf('{')
+        val lastBrace = result.lastIndexOf('}')
 
-        if (
-            firstBrace >= 0 &&
-            lastBrace > firstBrace
-        ) {
-            cleaned = cleaned.substring(
+        if (firstBrace >= 0 && lastBrace > firstBrace) {
+            result = result.substring(
                 firstBrace,
                 lastBrace + 1
             )
         }
 
-        return cleaned.trim()
+        return result
     }
 
-    // ============================================================
-    // STRUCTURAL VALIDATION AFTER PARSING
-    // ============================================================
+// ============================================================
+// STRUCTURAL VALIDATION
+// ============================================================
 
     private fun validateParsedAssignment(
         assignment: GeneratedAssignment,
@@ -1760,174 +1746,235 @@ class AIService {
         val errors = mutableListOf<String>()
 
         if (assignment.title.isBlank()) {
-            errors += "Title is empty"
+            errors += "Assignment title is empty"
         }
 
-        if (assignment.title.length < 5) {
-            errors += "Title is too short"
+        if (assignment.title.trim().length < 5) {
+            errors += "Assignment title is too short"
         }
 
         if (assignment.questions.size != 3) {
-            errors += "Expected exactly 3 questions"
+            errors += "Assignment must have exactly 3 questions"
         }
 
-        if (assignment.questions.map { it.id } != listOf(1, 2, 3)) {
-            errors += "Question IDs must be [1,2,3]"
+        val expectedIds = listOf(1, 2, 3)
+
+        if (assignment.questions.map { it.id } != expectedIds) {
+            errors += "Question IDs must be exactly 1,2,3"
         }
 
         if (assignment.answerKey.size != 3) {
-            errors += "Expected exactly 3 answers"
+            errors += "Assignment must have exactly 3 answers"
         }
 
-        if (assignment.answerKey.map { it.id } != listOf(1, 2, 3)) {
-            errors += "Answer IDs must be [1,2,3]"
+        if (assignment.answerKey.map { it.id }.sorted() != expectedIds) {
+            errors += "Answer IDs must be exactly 1,2,3"
         }
 
-        if (assignment.gradingGuide.length < 10) {
+        if (assignment.gradingGuide.trim().length < 10) {
             errors += "Grading guide is too short"
         }
 
-        if (!assignment.totalScore.isFinite()) {
-            errors += "totalScore is not finite"
-        }
-
         if (abs(assignment.totalScore - 10.0) > 0.001) {
-            errors += "totalScore must be 10"
+            errors += "Total score must be 10"
         }
 
-        val pointSum = assignment.questions.sumOf { it.points }
+        val pointsSum =
+            assignment.questions.sumOf { it.points }
+
+        if (abs(pointsSum - 10.0) > 0.001) {
+            errors += "Question points must sum to 10"
+        }
+
+        val hasLearningMaterial =
+            !assignment.learningMaterial.isNullOrBlank()
+
+        val requiresLearningMaterial =
+            assignment.questions.any {
+                it.sourceType ==
+                        QuestionSourceType.LESSON_CONTENT ||
+                        it.sourceType ==
+                        QuestionSourceType.READING_PASSAGE
+            }
 
         if (
-            !pointSum.isFinite() ||
-            abs(pointSum - 10.0) > 0.001
+            requiresLearningMaterial &&
+            !hasLearningMaterial
         ) {
-            errors += "Question points must total 10"
+            errors +=
+                "Assignment requires learningMaterial but learningMaterial is missing."
         }
 
-        assignment.questions.forEach { q ->
-
-            if (q.question.isBlank()) {
-                errors += "Question ${q.id} is empty"
+        val referencesExternalMaterial =
+            assignment.questions.any { question ->
+                sourceReferencePatterns.any { pattern ->
+                    pattern.containsMatchIn(question.question)
+                }
             }
 
-            if (q.question.trim().length < 10) {
-                errors += "Question ${q.id} is too short"
-            }
+        if (
+            referencesExternalMaterial &&
+            !hasLearningMaterial
+        ) {
+            errors +=
+                "Question references reading/lesson material but learningMaterial is missing."
+        }
 
-            if (q.learningObjective.isBlank()) {
-                errors += "Question ${q.id} has empty learning objective"
-            }
-
-            if (q.learningObjective.trim().length < 10) {
-                errors += "Question ${q.id} learning objective is too short"
-            }
-
-            if (
-                !q.points.isFinite() ||
-                q.points <= 0.0
-            ) {
-                errors += "Question ${q.id} has invalid points"
-            }
-
-            if (
-                q.answerType == AnswerType.DRAWING ||
-                q.answerType == AnswerType.MIXED
-            ) {
-                errors +=
-                    "Question ${q.id}: DRAWING/MIXED is not supported"
-            }
-
-            val normalized = q.question
-                .lowercase()
-                .replace(Regex("\\s+"), " ")
+        if (
+            hasLearningMaterial &&
+            assignment.learningMaterial!!
                 .trim()
+                .length < 80
+        ) {
+            errors +=
+                "learningMaterial is too short."
+        }
 
-            if (containsSuspiciousText(normalized)) {
+        val normalizedQuestions =
+            mutableSetOf<String>()
+
+        val normalizedObjectives =
+            mutableSetOf<String>()
+
+        assignment.questions.forEach { question ->
+
+            if (question.question.isBlank()) {
                 errors +=
-                    "Question ${q.id} contains suspicious/generated placeholder text"
+                    "Question ${question.id} is empty"
             }
 
-            val longWord = normalized
-                .split(Regex("\\s+"))
-                .any { it.length > 40 }
-
-            if (longWord) {
+            if (question.question.trim().length < 5) {
                 errors +=
-                    "Question ${q.id} contains an abnormally long word"
+                    "Question ${question.id} is too short"
+            }
+
+            if (question.learningObjective.isBlank()) {
+                errors +=
+                    "Question ${question.id} has empty learningObjective"
+            }
+
+            if (question.learningObjective.trim().length < 5) {
+                errors +=
+                    "Question ${question.id} learningObjective is too short"
+            }
+
+            if (!question.points.isFinite() || question.points <= 0) {
+                errors +=
+                    "Question ${question.id} has invalid points"
             }
 
             if (
-                Regex("(.)\\1{5,}")
-                    .containsMatchIn(normalized)
+                question.answerType == AnswerType.DRAWING ||
+                question.answerType == AnswerType.MIXED
             ) {
                 errors +=
-                    "Question ${q.id} contains excessive repeated characters"
+                    "Question ${question.id} uses unsupported answer type"
+            }
+
+            try {
+                validateGradingCompatibility(
+                    answerType = question.answerType,
+                    gradingMethod = question.gradingMethod
+                )
+            } catch (e: Exception) {
+                errors +=
+                    "Question ${question.id}: ${e.message}"
+            }
+
+            if (containsSuspiciousText(question.question)) {
+                errors +=
+                    "Question ${question.id} contains suspicious text"
+            }
+
+            if (containsSuspiciousText(
+                    question.learningObjective
+                )
+            ) {
+                errors +=
+                    "Question ${question.id} learningObjective contains suspicious text"
+            }
+
+            if (
+                question.question.any { it == '\uFFFD' }
+            ) {
+                errors +=
+                    "Question ${question.id} contains invalid characters"
+            }
+
+            val veryLongWord =
+                question.question
+                    .split(Regex("\\s+"))
+                    .any { it.length > 40 }
+
+            if (veryLongWord) {
+                errors +=
+                    "Question ${question.id} contains an unusually long word"
+            }
+
+            val repeatedCharacters =
+                Regex("""(.)\1{7,}""")
+                    .containsMatchIn(question.question)
+
+            if (repeatedCharacters) {
+                errors +=
+                    "Question ${question.id} contains repeated characters"
+            }
+
+            val normalizedQuestion =
+                normalizeQuestion(question.question)
+
+            if (!normalizedQuestions.add(normalizedQuestion)) {
+                errors +=
+                    "Duplicate question detected: ${question.id}"
+            }
+
+            val normalizedObjective =
+                normalizeSemanticText(
+                    question.learningObjective
+                )
+
+            if (!normalizedObjectives.add(normalizedObjective)) {
+                errors +=
+                    "Duplicate learning objective detected: ${question.id}"
+            }
+
+            if (
+                question.sourceType !=
+                QuestionSourceType.SELF_CONTAINED &&
+                !hasLearningMaterial
+            ) {
+                errors +=
+                    "Question ${question.id} requires source material"
             }
         }
 
-        assignment.answerKey.forEach { answer ->
+        val answersById =
+            assignment.answerKey.associateBy { it.id }
 
-            if (answer.answer.isBlank()) {
-                errors += "Answer ${answer.id} is empty"
-            }
+        assignment.questions.forEach { question ->
 
-            if (containsSuspiciousText(answer.answer.lowercase())) {
+            val answer = answersById[question.id]
+
+            if (answer == null) {
+                errors +=
+                    "Missing answer for question ${question.id}"
+            } else if (answer.answer.isBlank()) {
+                errors +=
+                    "Answer ${answer.id} is empty"
+            } else if (
+                containsSuspiciousText(answer.answer)
+            ) {
                 errors +=
                     "Answer ${answer.id} contains suspicious text"
             }
         }
 
-        val normalizedQuestions = assignment.questions
-            .map { normalizeQuestion(it.question) }
-
-        if (
-            normalizedQuestions.distinct().size !=
-            normalizedQuestions.size
-        ) {
-            errors += "Duplicate questions detected"
-        }
-
-        val normalizedObjectives = assignment.questions
-            .map {
-                normalizeSemanticText(
-                    it.learningObjective
-                )
-            }
-
-        if (
-            normalizedObjectives.distinct().size !=
-            normalizedObjectives.size
-        ) {
-            errors +=
-                "Learning objectives are duplicated"
-        }
-
-        val answerIds = assignment.answerKey
-            .map { it.id }
-            .toSet()
-
-        val questionIds = assignment.questions
-            .map { it.id }
-            .toSet()
-
-        if (answerIds != questionIds) {
-            errors +=
-                "Question and answer IDs do not match"
-        }
-
         if (errors.isNotEmpty()) {
             throw IllegalStateException(
-                buildString {
-                    appendLine(
-                        "Generated assignment failed structural validation."
-                    )
-                    appendLine(
-                        "Grade=$grade subject=$subject difficulty=$difficulty"
-                    )
-                    errors.forEach {
-                        appendLine("- $it")
-                    }
-                }
+                "Assignment validation failed:\n" +
+                        errors.joinToString("\n") {
+                            "- $it"
+                        }
             )
         }
     }
@@ -1947,7 +1994,10 @@ class AIService {
         )
 
         return suspicious.any {
-            text.contains(it, ignoreCase = true)
+            text.contains(
+                it,
+                ignoreCase = true
+            )
         }
     }
 
@@ -1958,7 +2008,10 @@ class AIService {
             .lowercase()
             .replace(Regex("\\s+"), " ")
             .trim()
-            .replace(Regex("[.!?,;:]+$"), "")
+            .replace(
+                Regex("[.!?,;:]+$"),
+                ""
+            )
     }
 
     private fun normalizeSemanticText(
@@ -1974,9 +2027,9 @@ class AIService {
             .trim()
     }
 
-    // ============================================================
-    // SEX EDUCATION VALIDATION
-    // ============================================================
+// ============================================================
+// SEX EDUCATION VALIDATION
+// ============================================================
 
     private fun validateSexEducationAssignment(
         assignment: GeneratedAssignment,
@@ -1986,15 +2039,18 @@ class AIService {
         val errors = mutableListOf<String>()
 
         if (assignment.questions.size != 3) {
-            errors += "Sex education assignment must have exactly 3 questions"
+            errors +=
+                "Sex education assignment must have exactly 3 questions"
         }
 
         if (assignment.answerKey.size != 3) {
-            errors += "Sex education assignment must have exactly 3 answers"
+            errors +=
+                "Sex education assignment must have exactly 3 answers"
         }
 
         if (abs(assignment.totalScore - 10.0) > 0.001) {
-            errors += "Sex education totalScore must be 10"
+            errors +=
+                "Sex education totalScore must be 10"
         }
 
         assignment.questions.forEach { question ->
@@ -2021,9 +2077,8 @@ class AIService {
                             "question cannot use EXACT grading"
             }
 
-            val normalized = question.question
-                .lowercase()
-                .replace(Regex("\\s+"), " ")
+            val normalized =
+                question.question.lowercase()
 
             val unsafePatterns = listOf(
                 "hãy kể trải nghiệm tình dục",
@@ -2042,9 +2097,11 @@ class AIService {
         }
 
         if (grade in 1..5) {
+
             assignment.questions.forEach { question ->
 
-                val text = question.question.lowercase()
+                val text =
+                    question.question.lowercase()
 
                 val overlyAdvancedTerms = listOf(
                     "thuốc tránh thai",
@@ -2059,7 +2116,7 @@ class AIService {
                     }
                 ) {
                     errors +=
-                        "Question ${question.id} may exceed the age scope for grade $grade"
+                        "Question ${question.id} may exceed age scope for grade $grade"
                 }
             }
         }
@@ -2067,19 +2124,20 @@ class AIService {
         if (errors.isNotEmpty()) {
             throw IllegalStateException(
                 "Sex education validation failed:\n" +
-                        errors.joinToString("\n") { "- $it" }
+                        errors.joinToString("\n") {
+                            "- $it"
+                        }
             )
         }
 
         println(
-            "[AIService] Sex education validation PASS " +
-                    "grade=$grade"
+            "[AIService] Sex education validation PASS grade=$grade"
         )
     }
 
-    // ============================================================
-    // GRADING COMPATIBILITY
-    // ============================================================
+// ============================================================
+// GRADING COMPATIBILITY
+// ============================================================
 
     private fun validateGradingCompatibility(
         answerType: AnswerType,
@@ -2097,7 +2155,8 @@ class AIService {
 
             AnswerType.DRAWING ->
                 gradingMethod == GradingMethod.OPENCV ||
-                        gradingMethod == GradingMethod.OPENCV_VISION_AI
+                        gradingMethod ==
+                        GradingMethod.OPENCV_VISION_AI
 
             AnswerType.SPEECH_TO_TEXT ->
                 gradingMethod == GradingMethod.EXACT ||
@@ -2115,9 +2174,9 @@ class AIService {
         }
     }
 
-    // ============================================================
-    // QUALITY REVIEW
-    // ============================================================
+// ============================================================
+// QUALITY REVIEW
+// ============================================================
 
     suspend fun reviewGeneratedAssignment(
         assignment: GeneratedAssignment,
@@ -2127,48 +2186,54 @@ class AIService {
         difficulty: Difficulty
     ): AssignmentQualityReview {
 
-        val sexEducation = isSexEducation(subject)
+        val sexEducation =
+            isSexEducation(subject)
 
         println(
             "[AIService] Reviewing generated assignment " +
                     "grade=$grade subject=$subject topic=$topic difficulty=$difficulty"
         )
 
-        val blueprint = if (sexEducation) {
-            createSexEducationBlueprint(
-                grade = grade,
-                topic = topic ?: "sức khỏe giới tính phù hợp độ tuổi",
-                difficulty = difficulty
-            )
-        } else {
-            createBlueprint(
+        val blueprint =
+            if (sexEducation) {
+                createSexEducationBlueprint(
+                    grade = grade,
+                    topic = topic
+                        ?: "sức khỏe giới tính phù hợp độ tuổi",
+                    difficulty = difficulty
+                )
+            } else {
+                createBlueprint(
+                    grade = grade,
+                    subject = subject,
+                    topic = topic,
+                    difficulty = difficulty
+                )
+            }
+
+        val prompt =
+            buildQualityReviewPrompt(
+                assignment = assignment,
                 grade = grade,
                 subject = subject,
                 topic = topic,
-                difficulty = difficulty
+                difficulty = difficulty,
+                blueprint = blueprint
             )
-        }
 
-        val prompt = buildQualityReviewPrompt(
-            assignment = assignment,
-            grade = grade,
-            subject = subject,
-            topic = topic,
-            difficulty = difficulty,
-            blueprint = blueprint
-        )
+        val response =
+            withContext(Dispatchers.IO) {
+                callGeminiWithRetry(
+                    prompt = prompt,
+                    sexEducation = sexEducation,
+                    temperature = 0.1
+                )
+            }
 
-        val response = withContext(Dispatchers.IO) {
-            callGeminiWithRetry(
-                prompt = prompt,
-                sexEducation = sexEducation,
-                temperature = 0.1
+        val review =
+            parseQualityReviewResponse(
+                responseText = response
             )
-        }
-
-        val review = parseQualityReviewResponse(
-            responseText = response
-        )
 
         println(
             "[AIService] Quality review pass=${review.pass} " +
@@ -2190,13 +2255,14 @@ class AIService {
         val questionsText = assignment.questions
             .joinToString("\n\n") { q ->
                 """
-                Q${q.id}
-                Question: ${q.question}
-                Learning objective: ${q.learningObjective}
-                Points: ${q.points}
-                Answer type: ${q.answerType}
-                Grading method: ${q.gradingMethod}
-                """.trimIndent()
+            Q${q.id}
+            Question: ${q.question}
+            Learning objective: ${q.learningObjective}
+            Points: ${q.points}
+            Answer type: ${q.answerType}
+            Grading method: ${q.gradingMethod}
+            Source type: ${q.sourceType}
+            """.trimIndent()
             }
 
         val answersText = assignment.answerKey
@@ -2204,174 +2270,405 @@ class AIService {
                 "Answer ${it.id}: ${it.answer}"
             }
 
+        val learningMaterialText =
+            assignment.learningMaterial
+                ?.trim()
+                ?.takeIf { it.isNotBlank() }
+                ?: "(Không có learningMaterial)"
+
         return """
-            Bạn là reviewer chất lượng giáo dục.
-            KHÔNG sửa bài. Chỉ đánh giá PASS hoặc FAIL.
+        Bạn là reviewer chất lượng giáo dục.
 
-            === CONTEXT ===
-            Grade: $grade
-            Subject: $subject
-            Topic: ${topic ?: "auto"}
-            Difficulty: $difficulty
+        KHÔNG sửa bài.
+        KHÔNG viết lại câu hỏi.
+        Chỉ đánh giá bài tập có PASS hay FAIL.
 
-            === BLUEPRINT MONG MUỐN ===
-            ${blueprintAsPrompt(blueprint)}
+        === CONTEXT ===
+        Grade: $grade
+        Subject: $subject
+        Topic: ${topic ?: "auto"}
+        Difficulty: $difficulty
 
-            === ASSIGNMENT ===
-            Title:
-            ${assignment.title}
+        === BLUEPRINT MONG MUỐN ===
+        ${blueprintAsPrompt(blueprint)}
 
-            Questions:
-            $questionsText
+        === ASSIGNMENT ===
 
-            Answer key:
-            $answersText
+        Title:
+        ${assignment.title}
 
-            Grading guide:
-            ${assignment.gradingGuide}
+        Learning material:
+        $learningMaterialText
 
-            Total score:
-            ${assignment.totalScore}
+        Questions:
+        $questionsText
 
-            === REVIEW CRITERIA ===
+        Answer key:
+        $answersText
 
-            1. NGÔN NGỮ
-            - Chính tả đúng.
-            - Từ ngữ tự nhiên.
-            - Ngữ pháp đúng.
-            - Không có từ vô nghĩa.
-            - Không có câu dịch máy khó hiểu.
-            - Không có lỗi kiểu AI như:
-              "bà giắt", "bat ngô",
-              "con vật thực hiện phép cộng",
-              "một cây có thể chạy nhanh"
-              hoặc các câu tương tự vô nghĩa.
+        Grading guide:
+        ${assignment.gradingGuide}
 
-            2. Ý NGHĨA CÂU HỎI
-            - Câu hỏi phải hiểu được ngay.
-            - Đủ dữ kiện.
-            - Không mâu thuẫn.
-            - Không mơ hồ.
-            - Không có nhiều cách hiểu ngoài ý muốn.
+        Total score:
+        ${assignment.totalScore}
 
-            3. ĐÚNG KIẾN THỨC
-            - Kiến thức đúng.
-            - Công thức đúng.
-            - Thuật ngữ đúng.
-            - AnswerKey đúng.
-            - Không có kết luận khoa học sai.
+        ============================================================
+        REVIEW CRITERIA
+        ============================================================
 
-            4. PHÙ HỢP LỚP
-            - Không dùng kiến thức vượt lớp.
-            - Không dùng thuật ngữ chưa phù hợp.
-            - Độ dài và cách diễn đạt phù hợp.
+        1. NGÔN NGỮ
 
-            5. ĐỘ KHÓ
-            - Phù hợp $difficulty.
-            - Không quá dễ.
-            - Không quá khó.
-            - Không tăng độ khó giả tạo chỉ bằng số lớn hoặc câu dài.
+        - Chính tả đúng.
+        - Từ ngữ tự nhiên bằng tiếng Việt.
+        - Ngữ pháp đúng.
+        - Không có từ vô nghĩa.
+        - Không có câu dịch máy khó hiểu.
+        - Không có lỗi ngữ nghĩa.
+        - Không có placeholder.
+        - Không có từ hoặc cụm từ bị ghép sai.
 
-            6. COGNITIVE PROGRESSION
-            Q1 phải thiên về hiểu/nền tảng.
-            Q2 phải thiên về vận dụng.
-            Q3 phải thiên về reasoning/phân tích khi môn học cho phép.
+        Các ví dụ như:
+        - "bà giắt"
+        - "bat ngô"
+        - "con vật thực hiện phép cộng"
+        - "một cây có thể chạy nhanh"
 
-            Nếu cả 3 câu thực chất dùng cùng một thao tác,
-            phải FAIL.
+        hoặc bất kỳ câu tương tự vô nghĩa nào đều phải FAIL.
 
-            7. SEMANTIC DIVERSITY
-            FAIL nếu:
-            - chỉ đổi số;
-            - chỉ đổi tên;
-            - chỉ đổi một vài từ;
-            - cùng context;
-            - cùng answer pattern;
-            - cùng cách giải;
-            - cùng learning objective;
-            - Q2/Q3 chỉ dài hơn nhưng không sâu hơn.
+        ------------------------------------------------------------
 
-            PASS nếu:
-            - cùng kiến thức nhưng khác cách vận dụng;
-            - khác reasoning;
-            - khác context;
-            - khác kỹ năng;
-            - hoặc có tiến triển nhận thức rõ ràng.
+        2. Ý NGHĨA CÂU HỎI
 
-            8. ANSWER ALIGNMENT
-            Mỗi answer phải trực tiếp trả lời question tương ứng.
+        Mỗi câu phải:
 
-            9. GRADING
-            GradingGuide phải phù hợp câu hỏi.
-            Không được yêu cầu tiêu chí mà answerKey không hỗ trợ.
+        - hiểu được ngay;
+        - có đủ dữ kiện;
+        - không mâu thuẫn;
+        - không mơ hồ;
+        - không có nhiều cách hiểu ngoài ý muốn;
+        - thực sự kiểm tra kiến thức/kỹ năng đã nêu.
 
-            10. ANSWER TYPE
-            Chỉ:
-            TEXT,
-            HANDWRITING,
-            SPEECH_TO_TEXT.
+        Nếu câu hỏi có lỗi logic hoặc không thể trả lời hợp lý:
+        FAIL.
 
-            Mapping:
-            TEXT -> EXACT/AI_TEXT
-            HANDWRITING -> OCR_AI
-            SPEECH_TO_TEXT -> EXACT/AI_TEXT
+        ------------------------------------------------------------
 
-            DRAWING/MIXED phải FAIL.
+        3. ĐÚNG KIẾN THỨC
 
-            11. PEDAGOGY
-            Bài tập phải có giá trị giáo dục.
-            Không được tạo ba câu chỉ để đủ số lượng.
+        Kiểm tra:
 
-            12. SEX EDUCATION
-            Nếu là giáo dục giới tính:
-            - phù hợp độ tuổi;
-            - khoa học;
-            - không khiêu dâm;
-            - không yêu cầu thông tin riêng tư;
-            - không yêu cầu trải nghiệm cá nhân;
-            - không sexualize trẻ em;
-            - ưu tiên an toàn và tìm trợ giúp.
+        - kiến thức;
+        - công thức;
+        - thuật ngữ;
+        - dữ kiện;
+        - answerKey;
+        - gradingGuide.
 
-            === QUYẾT ĐỊNH ===
-            Chỉ PASS khi tất cả tiêu chí quan trọng đều đạt.
-            Chỉ một lỗi nghiêm trọng cũng phải FAIL.
+        Không được có kết luận khoa học sai.
 
-            Trả về JSON duy nhất:
+        Nếu answerKey sai hoặc không trả lời đúng câu hỏi:
+        FAIL.
 
-            {
-              "pass": true,
-              "issues": [],
-              "summary": "..."
-            }
-        """.trimIndent()
+        ------------------------------------------------------------
+
+        4. PHÙ HỢP LỚP
+
+        - Kiến thức phải phù hợp lớp $grade.
+        - Không sử dụng thuật ngữ vượt quá trình độ nếu không được giải thích.
+        - Độ dài câu hỏi phù hợp.
+        - Cách diễn đạt phù hợp học sinh.
+
+        ------------------------------------------------------------
+
+        5. ĐỘ KHÓ
+
+        Độ khó mong muốn:
+
+        $difficulty
+
+        Không được:
+
+        - quá dễ so với yêu cầu;
+        - quá khó so với lớp;
+        - tăng độ khó giả tạo bằng cách dùng số lớn;
+        - tăng độ khó giả tạo bằng cách viết câu dài.
+
+        ------------------------------------------------------------
+
+        6. COGNITIVE PROGRESSION
+
+        Q1 phải thiên về hiểu/nền tảng.
+
+        Q2 phải thiên về vận dụng.
+
+        Q3 phải thiên về reasoning/phân tích khi môn học cho phép.
+
+        Nếu cả 3 câu thực chất chỉ dùng cùng một thao tác:
+        FAIL.
+
+        ------------------------------------------------------------
+
+        7. SEMANTIC DIVERSITY
+
+        FAIL nếu:
+
+        - chỉ đổi số;
+        - chỉ đổi tên;
+        - chỉ đổi vài từ;
+        - cùng context;
+        - cùng answer pattern;
+        - cùng cách giải;
+        - cùng learning objective;
+        - Q2/Q3 chỉ dài hơn nhưng không sâu hơn.
+
+        PASS nếu:
+
+        - cùng kiến thức nhưng khác cách vận dụng;
+        - khác reasoning;
+        - khác context;
+        - khác kỹ năng;
+        - hoặc có tiến triển nhận thức rõ ràng.
+
+        ------------------------------------------------------------
+
+        8. ANSWER ALIGNMENT
+
+        Với từng Q:
+
+        Q1 -> Answer 1
+        Q2 -> Answer 2
+        Q3 -> Answer 3
+
+        Phải kiểm tra:
+
+        - answer thực sự trả lời question;
+        - answer không thuộc câu khác;
+        - answer không chứa thông tin mâu thuẫn;
+        - answer đủ để chấm theo gradingGuide.
+
+        Nếu answer không phù hợp câu hỏi:
+        FAIL.
+
+        ------------------------------------------------------------
+
+        9. GRADING
+
+        GradingGuide phải:
+
+        - phù hợp câu hỏi;
+        - phù hợp answerKey;
+        - phù hợp số điểm;
+        - có thể dùng để chấm câu trả lời thực tế.
+
+        Không được yêu cầu tiêu chí mà answerKey không hỗ trợ.
+
+        ------------------------------------------------------------
+
+        10. ANSWER TYPE
+
+        Chỉ được sử dụng:
+
+        TEXT
+        HANDWRITING
+        SPEECH_TO_TEXT
+
+        Mapping:
+
+        TEXT -> EXACT hoặc AI_TEXT
+        HANDWRITING -> OCR_AI
+        SPEECH_TO_TEXT -> EXACT hoặc AI_TEXT
+
+        DRAWING hoặc MIXED:
+        FAIL.
+
+        ------------------------------------------------------------
+
+        11. PEDAGOGY
+
+        Bài tập phải có giá trị giáo dục.
+
+        Không được tạo ba câu chỉ để đủ số lượng.
+
+        Ba câu phải tạo thành một progression hợp lý:
+
+        Q1 -> hiểu nền tảng
+        Q2 -> vận dụng
+        Q3 -> suy luận/phân tích
+
+        ------------------------------------------------------------
+
+        12. LEARNING MATERIAL / SOURCE TYPE
+
+        Mỗi câu có:
+
+        - SELF_CONTAINED
+        - LESSON_CONTENT
+        - hoặc READING_PASSAGE
+
+        Kiểm tra chính xác sự phù hợp giữa sourceType,
+        question và learningMaterial.
+
+        === SELF_CONTAINED ===
+
+        Nếu sourceType = SELF_CONTAINED:
+
+        - Câu hỏi phải có đủ dữ kiện để trả lời.
+        - Không được phụ thuộc vào tài liệu không được cung cấp.
+
+        === LESSON_CONTENT ===
+
+        Nếu sourceType = LESSON_CONTENT:
+
+        - learningMaterial phải tồn tại.
+        - learningMaterial phải liên quan trực tiếp đến câu hỏi.
+        - Nội dung cần thiết phải có trong learningMaterial.
+        - Học sinh không được phải tự tìm thêm nguồn bên ngoài.
+
+        === READING_PASSAGE ===
+
+        Nếu sourceType = READING_PASSAGE:
+
+        - learningMaterial bắt buộc phải tồn tại.
+        - learningMaterial phải là một bài đọc/nội dung đọc có ý nghĩa.
+        - Câu hỏi phải dựa trực tiếp hoặc suy luận hợp lý từ bài đọc.
+        - AnswerKey phải có thể tìm thấy hoặc suy luận hợp lý từ bài đọc.
+
+        ------------------------------------------------------------
+
+        13. LEARNING MATERIAL QUALITY
+
+        Nếu assignment có learningMaterial:
+
+        - material phải thực sự liên quan đến assignment;
+        - không phải nội dung ngẫu nhiên;
+        - không phải filler;
+        - không được chỉ tạo material để đối phó validator;
+        - phải phù hợp lớp;
+        - phải phù hợp môn học;
+        - phải phù hợp chủ đề.
+
+        Nếu material quá ngắn để hỗ trợ các câu hỏi:
+        FAIL.
+
+        Nếu material chứa thông tin mâu thuẫn với answerKey:
+        FAIL.
+
+        Nếu câu hỏi yêu cầu thông tin không có trong material
+        và sourceType cho biết câu hỏi phụ thuộc vào material:
+        FAIL.
+
+        ------------------------------------------------------------
+
+        14. EXTERNAL REFERENCE CHECK
+
+        FAIL nếu câu hỏi sử dụng các kiểu:
+
+        - "Đọc đoạn văn trên..."
+        - "Dựa vào bài học trên..."
+        - "Theo nội dung trên..."
+        - "Theo bảng trên..."
+        - "Nhìn vào hình trên..."
+        - "Dựa vào đoạn văn..."
+        - "Theo bài đọc..."
+
+        nhưng learningMaterial không cung cấp nội dung tương ứng.
+
+        Không được yêu cầu học sinh:
+
+        - tự mở sách giáo khoa;
+        - tự tìm Internet;
+        - tự tìm tài liệu bên ngoài;
+
+        để có thể trả lời một câu hỏi vốn được đánh dấu
+        là LESSON_CONTENT hoặc READING_PASSAGE.
+
+        ------------------------------------------------------------
+
+        15. SEX EDUCATION
+
+        Nếu đây là giáo dục sức khỏe giới tính:
+
+        - phù hợp độ tuổi;
+        - khoa học;
+        - không khiêu dâm;
+        - không sexualize trẻ em;
+        - không yêu cầu trải nghiệm cá nhân;
+        - không yêu cầu thông tin riêng tư;
+        - không yêu cầu ảnh/video riêng tư;
+        - không làm học sinh xấu hổ;
+        - ưu tiên an toàn;
+        - ưu tiên ranh giới cá nhân;
+        - ưu tiên quyền từ chối;
+        - ưu tiên tìm người lớn đáng tin cậy khi cần.
+
+        ------------------------------------------------------------
+
+        === QUYẾT ĐỊNH ===
+
+        Chỉ PASS khi tất cả tiêu chí quan trọng đều đạt.
+
+        Chỉ một lỗi nghiêm trọng về:
+
+        - tính đúng đắn;
+        - answer alignment;
+        - learningMaterial;
+        - sourceType;
+        - độ tuổi;
+        - ngôn ngữ;
+        - hoặc an toàn
+
+        cũng phải FAIL.
+
+        Không được PASS chỉ vì bài có đúng cấu trúc JSON.
+
+        Trả về JSON duy nhất:
+
+        {
+          "pass": true,
+          "issues": [],
+          "summary": "..."
+        }
+
+        Nếu FAIL:
+        - pass = false
+        - issues phải liệt kê rõ từng lỗi.
+        - summary phải giải thích ngắn gọn nguyên nhân.
+
+        Không trả markdown.
+        Không trả text ngoài JSON.
+    """.trimIndent()
     }
 
     private fun parseQualityReviewResponse(
         responseText: String
     ): AssignmentQualityReview {
 
-        val root = parseGeminiJsonResponse(
-            responseText
-        ).jsonObject
+        val root =
+            parseGeminiJsonResponse(
+                responseText
+            ).jsonObject
 
-        val pass = root["pass"]
-            ?.jsonPrimitive
-            ?.booleanOrNull
-            ?: throw IllegalStateException(
-                "Quality review missing pass"
-            )
+        val pass =
+            root["pass"]
+                ?.jsonPrimitive
+                ?.booleanOrNull
+                ?: throw IllegalStateException(
+                    "Quality review missing pass"
+                )
 
-        val issues = root["issues"]
-            ?.jsonArray
-            ?.mapNotNull {
-                it.jsonPrimitive.contentOrNull
-            }
-            ?: emptyList()
+        val issues =
+            root["issues"]
+                ?.jsonArray
+                ?.mapNotNull {
+                    it.jsonPrimitive.contentOrNull
+                }
+                ?: emptyList()
 
-        val summary = root["summary"]
-            ?.jsonPrimitive
-            ?.contentOrNull
-            ?: ""
+        val summary =
+            root["summary"]
+                ?.jsonPrimitive
+                ?.contentOrNull
+                ?: ""
 
         return AssignmentQualityReview(
             pass = pass,
@@ -2380,9 +2677,9 @@ class AIService {
         )
     }
 
-    // ============================================================
-    // GRADING
-    // ============================================================
+// ============================================================
+// GRADING
+// ============================================================
 
     suspend fun gradeAssignment(
         assignment: GeneratedAssignment,
@@ -2392,43 +2689,42 @@ class AIService {
 
         val sexEducation =
             isSexEducation(subject) ||
-                    looksLikeSexEducationAssignment(assignment)
+                    looksLikeSexEducationAssignment(
+                        assignment
+                    )
 
-        val prompt = if (sexEducation) {
-            buildSexEducationGradingPrompt(
-                assignment = assignment,
-                studentAnswer = studentAnswer
-            )
-        } else {
-            buildGradingPrompt(
-                assignment = assignment,
-                studentAnswer = studentAnswer
-            )
-        }
+        val prompt =
+            if (sexEducation) {
+                buildSexEducationGradingPrompt(
+                    assignment = assignment,
+                    studentAnswer = studentAnswer
+                )
+            } else {
+                buildGradingPrompt(
+                    assignment = assignment,
+                    studentAnswer = studentAnswer
+                )
+            }
 
-        val key = if (sexEducation) {
-            sexEducationApiKey ?: apiKey
-        } else {
-            apiKey
-        }
+        val key =
+            if (sexEducation) {
+                sexEducationApiKey ?: apiKey
+            } else {
+                apiKey
+            }
 
         require(!key.isNullOrBlank()) {
             "Gemini API key is not configured"
         }
 
-        val selectedModel = if (sexEducation) {
-            sexEducationModel
-        } else {
-            model
-        }
-
-        val response = withContext(Dispatchers.IO) {
-            callGeminiWithRetry(
-                prompt = prompt,
-                sexEducation = sexEducation,
-                temperature = 0.2
-            )
-        }
+        val response =
+            withContext(Dispatchers.IO) {
+                callGeminiWithRetry(
+                    prompt = prompt,
+                    sexEducation = sexEducation,
+                    temperature = 0.2
+                )
+            }
 
         return parseGradingResponse(
             responseText = response
@@ -2439,14 +2735,21 @@ class AIService {
         assignment: GeneratedAssignment
     ): Boolean {
 
-        val combined = buildString {
-            append(assignment.title)
-            append(" ")
-            assignment.questions.forEach {
-                append(it.question)
+        val combined =
+            buildString {
+                append(assignment.title)
                 append(" ")
-            }
-        }.lowercase()
+
+                assignment.questions.forEach {
+                    append(it.question)
+                    append(" ")
+                }
+
+                assignment.learningMaterial
+                    ?.let {
+                        append(it)
+                    }
+            }.lowercase()
 
         val keywords = listOf(
             "dậy thì",
@@ -2468,174 +2771,368 @@ class AIService {
         studentAnswer: String
     ): String {
 
-        val questions = assignment.questions
-            .joinToString("\n\n") { q ->
+        val material =
+            assignment.learningMaterial
+                ?.trim()
+                ?.takeIf { it.isNotBlank() }
+                ?: "(Không có learningMaterial)"
+
+        val questions =
+            assignment.questions.joinToString("\n\n") { q ->
+
                 """
-                Question ${q.id}:
-                ${q.question}
+            Question ${q.id}:
+            ${q.question}
 
-                Expected answer:
-                ${assignment.answerKey
-                    .firstOrNull { a -> a.id == q.id }
-                    ?.answer ?: ""}
+            Source type:
+            ${q.sourceType}
 
-                Learning objective:
-                ${q.learningObjective}
+            Expected answer:
+            ${
+                    assignment.answerKey
+                        .firstOrNull { a ->
+                            a.id == q.id
+                        }
+                        ?.answer ?: ""
+                }
 
-                Points:
-                ${q.points}
+            Learning objective:
+            ${q.learningObjective}
 
-                Answer type:
-                ${q.answerType}
+            Points:
+            ${q.points}
 
-                Grading method:
-                ${q.gradingMethod}
-                """.trimIndent()
+            Answer type:
+            ${q.answerType}
+
+            Grading method:
+            ${q.gradingMethod}
+            """.trimIndent()
+
             }
 
         return """
-            Bạn là giáo viên chấm bài.
+        Bạn là giáo viên chấm bài.
 
-            === ASSIGNMENT ===
-            Title:
-            ${assignment.title}
+        === ASSIGNMENT ===
+        Title:
+        ${assignment.title}
 
-            $questions
+        === LEARNING MATERIAL ===
+        $material
 
-            Grading guide:
-            ${assignment.gradingGuide}
+        === QUESTIONS ===
+        $questions
 
-            Total score:
-            ${assignment.totalScore}
+        === GRADING GUIDE ===
+        ${assignment.gradingGuide}
 
-            === STUDENT ANSWER ===
-            $studentAnswer
+        === TOTAL SCORE ===
+        ${assignment.totalScore}
 
-            === RULES ===
-            - Chấm đúng theo nội dung bài.
-            - Không thay đổi thang điểm.
-            - Điểm tối đa là ${assignment.totalScore}.
-            - Cho điểm từng phần nếu câu trả lời đúng một phần.
-            - Chấp nhận cách diễn đạt khác nếu nội dung đúng.
-            - Không phạt chỉ vì cách diễn đạt khác answerKey nếu ý nghĩa đúng.
-            - Không tự tạo dữ kiện không có trong bài.
-            - Không đoán ý học sinh ngoài câu trả lời.
-            - Feedback ngắn, rõ, phù hợp học sinh.
+        === STUDENT ANSWER ===
+        $studentAnswer
 
-            Nếu studentAnswer trả lời đúng:
-            - cho điểm đầy đủ.
+        === RULES ===
 
-            Nếu đúng một phần:
-            - cho điểm tương ứng.
+        1. NGUYÊN TẮC CHẤM
+        - Chấm đúng theo câu hỏi, answerKey, learningObjective và gradingGuide.
+        - Không thay đổi thang điểm.
+        - Điểm tối đa là ${assignment.totalScore}.
+        - Nếu học sinh đúng một phần, cho điểm tương ứng.
+        - Chấp nhận cách diễn đạt khác answerKey nếu nội dung và ý nghĩa đúng.
+        - Không phạt chỉ vì học sinh dùng từ khác answerKey.
+        - Không tự tạo dữ kiện không có trong assignment.
+        - Không đoán ý học sinh ngoài nội dung studentAnswer.
+        - Feedback phải ngắn, rõ và phù hợp với học sinh.
 
-            Nếu sai:
-            - điểm thấp hoặc 0 tùy mức độ.
-            - feedback chỉ ra kiến thức cần sửa.
+        2. SOURCE TYPE
 
-            Trả JSON:
+        SELF_CONTAINED:
+        - Câu hỏi phải được chấm dựa trên chính nội dung câu hỏi,
+          answerKey và kiến thức cần thiết đã được xác định trong assignment.
+        - Không cần learningMaterial để chấm.
 
-            {
-              "score": 0,
-              "feedback": "..."
-            }
-        """.trimIndent()
+        LESSON_CONTENT:
+        - Nếu câu hỏi yêu cầu kiến thức từ learningMaterial,
+          phải sử dụng learningMaterial làm nguồn ngữ cảnh chính.
+        - Không tự bổ sung thông tin từ Internet hoặc nguồn ngoài
+          nếu learningMaterial đã cung cấp đủ thông tin.
+        - Nếu câu trả lời phù hợp với nội dung learningMaterial,
+          phải công nhận dù cách diễn đạt khác answerKey.
+
+        READING_PASSAGE:
+        - Câu trả lời phải được đánh giá dựa trên learningMaterial.
+        - Với câu hỏi đọc hiểu, chỉ chấp nhận thông tin có trong bài đọc
+          hoặc suy luận hợp lý trực tiếp từ bài đọc.
+        - Không yêu cầu học sinh biết thêm thông tin ngoài bài đọc.
+        - Nếu học sinh trả lời đúng dựa trên bài đọc nhưng dùng cách diễn đạt
+          khác answerKey, vẫn phải cho điểm tương ứng.
+
+        3. LEARNING MATERIAL
+        - learningMaterial chỉ là nguồn ngữ cảnh khi câu hỏi yêu cầu.
+        - Không coi việc learningMaterial không tồn tại là lỗi đối với
+          câu hỏi SELF_CONTAINED.
+        - Nếu câu hỏi là LESSON_CONTENT hoặc READING_PASSAGE nhưng
+          learningMaterial bị thiếu, không được tự bịa nội dung còn thiếu.
+        - Không dùng thông tin ngoài assignment để "sửa" một câu hỏi
+          hoặc answerKey bị thiếu dữ kiện.
+
+        4. CHẤM ĐIỂM
+        Nếu studentAnswer đúng:
+        - cho điểm đầy đủ.
+
+        Nếu đúng một phần:
+        - cho điểm tương ứng với phần kiến thức/kỹ năng đúng.
+
+        Nếu sai:
+        - điểm thấp hoặc 0 tùy mức độ;
+        - feedback chỉ ra kiến thức hoặc cách suy luận cần sửa.
+
+        Nếu studentAnswer bỏ trống:
+        - cho 0 điểm;
+        - feedback ngắn gọn cho biết học sinh chưa trả lời.
+
+        5. KHÔNG SUY DIỄN QUÁ MỨC
+        - Không suy đoán ý định của học sinh.
+        - Không tự bổ sung câu trả lời còn thiếu.
+        - Không coi một câu trả lời mơ hồ là đúng nếu không có đủ căn cứ.
+        - Tuy nhiên, không được đánh sai chỉ vì học sinh diễn đạt khác
+          answerKey nhưng vẫn thể hiện đúng kiến thức.
+
+        6. OUTPUT
+        Chỉ trả về JSON hợp lệ, không markdown.
+
+        {
+          "score": 0,
+          "feedback": "..."
+        }
+
+        score phải nằm trong khoảng:
+        0 <= score <= ${assignment.totalScore}
+    """.trimIndent()
     }
 
-    private fun buildSexEducationGradingSystemInstruction(): String {
-        return """
-            Bạn chấm câu trả lời giáo dục sức khỏe giới tính/sức khỏe sinh sản.
-
-            Chỉ đánh giá kiến thức trong câu trả lời.
-            Không suy đoán đời sống riêng tư.
-            Không yêu cầu học sinh kể trải nghiệm cá nhân.
-            Không phán xét hoặc làm xấu hổ học sinh.
-            Chấp nhận cách diễn đạt khác nếu kiến thức đúng.
-            Với câu hỏi an toàn, ưu tiên:
-            - nhận diện nguy cơ;
-            - bảo vệ bản thân;
-            - ranh giới;
-            - tìm người lớn đáng tin cậy;
-            - tìm hỗ trợ chuyên môn khi cần.
-
-            Không đưa nội dung tình dục không cần thiết vào feedback.
-        """.trimIndent()
-    }
 
     private fun buildSexEducationGradingPrompt(
         assignment: GeneratedAssignment,
         studentAnswer: String
     ): String {
 
-        val questions = assignment.questions
-            .joinToString("\n\n") { q ->
+        val material =
+            assignment.learningMaterial
+                ?.trim()
+                ?.takeIf { it.isNotBlank() }
+                ?: "(Không có learningMaterial)"
+
+        val questions =
+            assignment.questions.joinToString("\n\n") { q ->
+
                 """
-                Question ${q.id}:
-                ${q.question}
+            Question ${q.id}:
+            ${q.question}
 
-                Expected answer:
-                ${assignment.answerKey
-                    .firstOrNull { a -> a.id == q.id }
-                    ?.answer ?: ""}
+            Source type:
+            ${q.sourceType}
 
-                Learning objective:
-                ${q.learningObjective}
+            Expected answer:
+            ${
+                    assignment.answerKey
+                        .firstOrNull { a ->
+                            a.id == q.id
+                        }
+                        ?.answer ?: ""
+                }
 
-                Points:
-                ${q.points}
-                """.trimIndent()
+            Learning objective:
+            ${q.learningObjective}
+
+            Points:
+            ${q.points}
+
+            Answer type:
+            ${q.answerType}
+
+            Grading method:
+            ${q.gradingMethod}
+            """.trimIndent()
             }
 
         return """
-            Chấm bài giáo dục sức khỏe phù hợp độ tuổi.
+        Bạn là giáo viên chấm bài giáo dục sức khỏe
+        giới tính/sức khỏe sinh sản phù hợp độ tuổi.
 
-            $questions
+        === ASSIGNMENT ===
+        Title:
+        ${assignment.title}
 
-            Grading guide:
-            ${assignment.gradingGuide}
+        === LEARNING MATERIAL ===
+        $material
 
-            Total score:
-            ${assignment.totalScore}
+        === QUESTIONS ===
+        $questions
 
-            Student answer:
-            $studentAnswer
+        === GRADING GUIDE ===
+        ${assignment.gradingGuide}
 
-            Quy tắc:
-            - Chỉ đánh giá kiến thức.
-            - Không đánh giá đời sống cá nhân.
-            - Không yêu cầu trải nghiệm cá nhân.
-            - Không phán xét.
-            - Chấp nhận cách diễn đạt đúng khác answerKey.
-            - Nếu có hiểu lầm, giải thích ngắn gọn kiến thức đúng.
-            - Nếu câu hỏi liên quan an toàn, ưu tiên hành động an toàn và tìm người đáng tin cậy.
-            - Không thay đổi thang điểm.
+        === TOTAL SCORE ===
+        ${assignment.totalScore}
 
-            Chỉ trả:
-            {
-              "score": 0,
-              "feedback": "..."
-            }
-        """.trimIndent()
+        === STUDENT ANSWER ===
+        $studentAnswer
+
+        === NGUYÊN TẮC CHẤM ===
+
+        1. CHẤM ĐÚNG NỘI DUNG
+        - Chấm dựa trên câu hỏi, answerKey, learningObjective
+          và gradingGuide.
+        - Không thay đổi thang điểm.
+        - Điểm tối đa là ${assignment.totalScore}.
+        - Nếu học sinh đúng một phần, cho điểm tương ứng.
+        - Chấp nhận cách diễn đạt khác answerKey nếu ý nghĩa khoa học đúng.
+        - Không phạt chỉ vì học sinh dùng từ khác answerKey.
+        - Không tự tạo dữ kiện không có trong assignment.
+        - Không đoán ý học sinh ngoài nội dung studentAnswer.
+
+        2. SOURCE TYPE
+
+        SELF_CONTAINED:
+        - Câu hỏi tự chứa thông tin cần thiết để trả lời.
+        - Không cần learningMaterial để chấm.
+        - Không tự yêu cầu học sinh cung cấp thông tin cá nhân
+          nếu câu hỏi không yêu cầu.
+
+        LESSON_CONTENT:
+        - Nếu câu hỏi dựa trên nội dung bài học,
+          sử dụng learningMaterial làm nguồn ngữ cảnh chính.
+        - Không tự bổ sung kiến thức từ Internet hoặc nguồn ngoài
+          nếu learningMaterial đã cung cấp đủ thông tin.
+        - Nếu học sinh trả lời đúng kiến thức dựa trên learningMaterial
+          nhưng diễn đạt khác answerKey, vẫn phải công nhận.
+
+        READING_PASSAGE:
+        - Nếu câu hỏi dựa trên bài đọc,
+          phải sử dụng learningMaterial để đánh giá câu trả lời.
+        - Chỉ yêu cầu thông tin có trong bài đọc
+          hoặc suy luận hợp lý trực tiếp từ bài đọc.
+        - Không yêu cầu học sinh biết thêm thông tin ngoài bài đọc.
+        - Không đánh sai chỉ vì câu trả lời không giống nguyên văn answerKey.
+
+        3. LEARNING MATERIAL
+        - learningMaterial chỉ là nguồn thông tin khi câu hỏi yêu cầu.
+        - Không coi việc learningMaterial không tồn tại là lỗi
+          đối với câu hỏi SELF_CONTAINED.
+        - Nếu câu hỏi là LESSON_CONTENT hoặc READING_PASSAGE
+          nhưng learningMaterial bị thiếu,
+          không được tự bịa nội dung còn thiếu.
+        - Không dùng kiến thức bên ngoài để sửa một câu hỏi
+          hoặc answerKey bị thiếu dữ kiện.
+
+        4. TÍNH KHOA HỌC
+        - Chấm theo kiến thức khoa học phù hợp với độ tuổi học sinh.
+        - Không chấp nhận thông tin sai về cơ thể,
+          tuổi dậy thì, sức khỏe sinh sản, ranh giới cá nhân,
+          sự đồng thuận, an toàn hoặc quyền riêng tư.
+        - Nếu học sinh diễn đạt chưa chính xác nhưng thể hiện
+          một phần kiến thức đúng, cho điểm tương ứng với phần đúng.
+        - Không yêu cầu câu trả lời phải dùng thuật ngữ y khoa
+          nếu học sinh đã thể hiện đúng ý nghĩa bằng ngôn ngữ phù hợp lứa tuổi.
+
+        5. AN TOÀN VÀ RIÊNG TƯ
+        - Không yêu cầu học sinh tiết lộ trải nghiệm cá nhân.
+        - Không yêu cầu học sinh mô tả đời sống tình dục cá nhân.
+        - Không yêu cầu ảnh, video hoặc thông tin riêng tư.
+        - Không suy đoán về trải nghiệm, hành vi hoặc hoàn cảnh cá nhân
+          của học sinh từ studentAnswer.
+        - Không đánh giá học sinh dựa trên đời sống hoặc hành vi cá nhân.
+        - Chỉ đánh giá kiến thức thể hiện trong câu trả lời.
+
+        6. TÌNH HUỐNG AN TOÀN
+        Nếu câu hỏi yêu cầu lựa chọn hành động an toàn:
+        - Ưu tiên câu trả lời thể hiện việc bảo vệ bản thân,
+          ranh giới cá nhân và quyền từ chối.
+        - Nếu phù hợp, công nhận việc tìm người lớn đáng tin cậy
+          hoặc nguồn hỗ trợ phù hợp.
+        - Không yêu cầu học sinh phải kể trải nghiệm thật của bản thân.
+        - Nếu câu trả lời khác answerKey nhưng vẫn thể hiện
+          hành động an toàn và phù hợp, cho điểm tương ứng.
+
+        7. CHẤM ĐIỂM
+
+        Nếu studentAnswer đúng:
+        - cho điểm đầy đủ.
+
+        Nếu studentAnswer đúng một phần:
+        - cho điểm tương ứng với kiến thức hoặc kỹ năng đúng.
+
+        Nếu studentAnswer sai:
+        - cho điểm thấp hoặc 0 tùy mức độ;
+        - feedback chỉ ra kiến thức cần sửa;
+        - không dùng ngôn ngữ làm học sinh xấu hổ hoặc đổ lỗi.
+
+        Nếu studentAnswer bỏ trống:
+        - cho 0 điểm;
+        - feedback ngắn gọn và khuyến khích học sinh xem lại kiến thức.
+
+        8. KHÔNG SUY DIỄN QUÁ MỨC
+        - Không đoán ý định của học sinh.
+        - Không tự bổ sung câu trả lời còn thiếu.
+        - Không coi câu trả lời mơ hồ là đúng nếu không có đủ căn cứ.
+        - Không đánh sai chỉ vì học sinh dùng cách diễn đạt khác answerKey
+          nhưng vẫn thể hiện đúng kiến thức.
+
+        9. FEEDBACK
+        Feedback phải:
+        - ngắn;
+        - rõ;
+        - mang tính giáo dục;
+        - phù hợp độ tuổi;
+        - không phán xét;
+        - không làm học sinh xấu hổ;
+        - chỉ ra kiến thức hoặc lý do cần sửa khi câu trả lời chưa đúng.
+
+        Không đưa vào feedback:
+        - nội dung tình dục không cần thiết;
+        - nhận xét về đời sống cá nhân;
+        - suy đoán về trải nghiệm của học sinh;
+        - yêu cầu học sinh cung cấp thông tin riêng tư.
+
+        10. OUTPUT
+
+        Chỉ trả về JSON hợp lệ, không markdown.
+
+        {
+          "score": 0,
+          "feedback": "..."
+        }
+
+        score phải nằm trong khoảng:
+        0 <= score <= ${assignment.totalScore}
+    """.trimIndent()
     }
 
     private fun parseGradingResponse(
         responseText: String
     ): GradingResult {
 
-        val root = parseGeminiJsonResponse(
-            responseText
-        ).jsonObject
+        val root =
+            parseGeminiJsonResponse(
+                responseText
+            ).jsonObject
 
-        val score = root["score"]
-            ?.jsonPrimitive
-            ?.doubleOrNull
-            ?: throw IllegalStateException(
-                "Grading response missing score"
-            )
+        val score =
+            root["score"]
+                ?.jsonPrimitive
+                ?.doubleOrNull
+                ?: throw IllegalStateException(
+                    "Grading response missing score"
+                )
 
-        val feedback = root["feedback"]
-            ?.jsonPrimitive
-            ?.contentOrNull
-            ?: ""
+        val feedback =
+            root["feedback"]
+                ?.jsonPrimitive
+                ?.contentOrNull
+                ?: ""
 
         if (!score.isFinite()) {
             throw IllegalStateException(
@@ -2649,4 +3146,6 @@ class AIService {
             questions = emptyList()
         )
     }
+
+
 }

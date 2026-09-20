@@ -70,7 +70,8 @@ object AssignmentValidator {
         questions: List<AIService.GeneratedQuestion>,
         answerKey: List<AIService.GeneratedAnswer>,
         gradingGuide: String,
-        totalScore: Double
+        totalScore: Double,
+        learningMaterial: String? = null
     ): ValidationResult {
 
         val errors = mutableListOf<String>()
@@ -131,7 +132,15 @@ object AssignmentValidator {
             questions = questions,
             errors = errors
         )
+// =====================================================
+// LEARNING MATERIAL / SOURCE TYPE
+// =====================================================
 
+        validateLearningMaterial(
+            questions = questions,
+            learningMaterial = learningMaterial,
+            errors = errors
+        )
         // =====================================================
         // ANSWER KEY
         // =====================================================
@@ -1190,5 +1199,172 @@ object AssignmentValidator {
                 Regex("[.!?,;:]+$"),
                 ""
             )
+    }
+    private fun validateLearningMaterial(
+        questions: List<AIService.GeneratedQuestion>,
+        learningMaterial: String?,
+        errors: MutableList<String>
+    ) {
+
+        val material =
+            learningMaterial
+                ?.trim()
+                ?.takeIf { it.isNotBlank() }
+
+        val hasMaterial =
+            material != null
+
+        // -------------------------------------------------
+        // SOURCE TYPE
+        // -------------------------------------------------
+
+        val requiresMaterial =
+            questions.any { question ->
+
+                question.sourceType ==
+                        AIService.QuestionSourceType.LESSON_CONTENT ||
+
+                        question.sourceType ==
+                        AIService.QuestionSourceType.READING_PASSAGE
+            }
+
+        // -------------------------------------------------
+        // SOURCE TYPE REQUIRES MATERIAL
+        // -------------------------------------------------
+
+        if (requiresMaterial && !hasMaterial) {
+
+            errors +=
+                "Assignment contains LESSON_CONTENT or READING_PASSAGE " +
+                        "questions but learningMaterial is missing"
+        }
+
+        // -------------------------------------------------
+        // MATERIAL LENGTH
+        // -------------------------------------------------
+
+        if (hasMaterial && material!!.length < 80) {
+
+            errors +=
+                "learningMaterial is too short"
+        }
+
+        // -------------------------------------------------
+        // EXTERNAL MATERIAL REFERENCES
+        // -------------------------------------------------
+
+        val sourceReferencePatterns =
+            listOf(
+
+                Regex(
+                    """\bđoạn\s+văn\s+(trên|dưới|sau|đây)\b""",
+                    RegexOption.IGNORE_CASE
+                ),
+
+                Regex(
+                    """\bbài\s+(đọc|học)\s+(trên|dưới|sau|đây)\b""",
+                    RegexOption.IGNORE_CASE
+                ),
+
+                Regex(
+                    """\bnội\s+dung\s+(trên|dưới|sau|đây)\b""",
+                    RegexOption.IGNORE_CASE
+                ),
+
+                Regex(
+                    """\bbảng\s+(trên|dưới|sau|đây)\b""",
+                    RegexOption.IGNORE_CASE
+                ),
+
+                Regex(
+                    """\bhình\s+(trên|dưới|sau|đây)\b""",
+                    RegexOption.IGNORE_CASE
+                ),
+
+                Regex(
+                    """\bdựa\s+vào\s+(đoạn|bài|nội\s+dung|bảng|hình)\b""",
+                    RegexOption.IGNORE_CASE
+                ),
+
+                Regex(
+                    """\bđọc\s+(đoạn\s+văn|bài\s+đọc)\b""",
+                    RegexOption.IGNORE_CASE
+                ),
+
+                Regex(
+                    """\btheo\s+(nội\s+dung|bài\s+học|đoạn\s+văn)\b""",
+                    RegexOption.IGNORE_CASE
+                )
+            )
+
+        val referencesMaterial =
+            questions.any { question ->
+
+                sourceReferencePatterns.any { pattern ->
+
+                    pattern.containsMatchIn(
+                        question.question
+                    )
+                }
+            }
+
+        if (referencesMaterial && !hasMaterial) {
+
+            errors +=
+                "Question references external lesson/reading material " +
+                        "but learningMaterial is missing"
+        }
+
+        // -------------------------------------------------
+        // SELF_CONTAINED + EXTERNAL REFERENCE
+        // -------------------------------------------------
+
+        questions.forEach { question ->
+
+            if (
+                question.sourceType ==
+                AIService.QuestionSourceType.SELF_CONTAINED
+            ) {
+
+                val referencesExternalMaterial =
+                    sourceReferencePatterns.any { pattern ->
+
+                        pattern.containsMatchIn(
+                            question.question
+                        )
+                    }
+
+                if (
+                    referencesExternalMaterial &&
+                    !hasMaterial
+                ) {
+
+                    errors +=
+                        "Question ${question.id} is marked SELF_CONTAINED " +
+                                "but references external material"
+                }
+            }
+        }
+
+        // -------------------------------------------------
+        // MATERIAL WITH SELF-CONTAINED QUESTIONS
+        // -------------------------------------------------
+
+        if (
+            hasMaterial &&
+            questions.all {
+                it.sourceType ==
+                        AIService.QuestionSourceType.SELF_CONTAINED
+            }
+        ) {
+
+            // Không FAIL.
+            //
+            // learningMaterial có thể tồn tại như nội dung
+            // bổ trợ cho assignment SELF_CONTAINED.
+            //
+            // Việc material có thực sự liên quan hay không
+            // sẽ do AI Quality Review kiểm tra.
+        }
     }
 }

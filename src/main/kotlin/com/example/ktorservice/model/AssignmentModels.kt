@@ -5,11 +5,13 @@ import kotlinx.serialization.Serializable
 @Serializable
 data class QuestionMetadata(
     val id: Int,
-    val question: String = "",
-    val learningObjective: String = "",
-    val points: Double = 0.0,
+    val question: String,
+    val learningObjective: String,
+    val points: Double,
     val answerType: AIService.AnswerType,
-    val gradingMethod: AIService.GradingMethod
+    val gradingMethod: AIService.GradingMethod,
+    val sourceType: AIService.QuestionSourceType =
+        AIService.QuestionSourceType.SELF_CONTAINED
 )
 @Serializable
 data class AssignmentGenerateResponse(
@@ -117,7 +119,9 @@ data class AssignmentQuestion(
     val learningObjective: String = "",
     val points: Double,
     val answerType: AIService.AnswerType,
-    val gradingMethod: AIService.GradingMethod
+    val gradingMethod: AIService.GradingMethod,
+    val sourceType: AIService.QuestionSourceType =
+        AIService.QuestionSourceType.SELF_CONTAINED
 )
 
 @Serializable

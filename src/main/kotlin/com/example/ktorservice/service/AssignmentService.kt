@@ -255,7 +255,8 @@ class AssignmentService(
                         questions = candidate.questions,
                         answerKey = candidate.answerKey,
                         gradingGuide = candidate.gradingGuide,
-                        totalScore = candidate.totalScore
+                        totalScore = candidate.totalScore,
+                        learningMaterial = candidate.learningMaterial
                     )
 
                 if (!validation.valid) {
@@ -409,12 +410,9 @@ class AssignmentService(
         // ========================================================
 
         val content =
-            finalGenerated.questions
-                .joinToString("\n\n") { question ->
-
-                    "Câu ${question.id} (${question.points} điểm):\n" +
-                            question.question
-                }
+            buildAssignmentContent(
+                assignment = finalGenerated
+            )
 
         // ========================================================
         // Tạo QuestionMetadata
@@ -430,7 +428,8 @@ class AssignmentService(
                         learningObjective = question.learningObjective,
                         points = question.points,
                         answerType = question.answerType,
-                        gradingMethod = question.gradingMethod
+                        gradingMethod = question.gradingMethod,
+                        sourceType = question.sourceType
                     )
                 }
             )
@@ -523,7 +522,8 @@ class AssignmentService(
                                     learningObjective = question.learningObjective,
                                     points = question.points,
                                     answerType = question.answerType,
-                                    gradingMethod = question.gradingMethod
+                                    gradingMethod = question.gradingMethod,
+                                    sourceType = question.sourceType
                                 )
                             }
                     )
@@ -1102,7 +1102,8 @@ class AssignmentService(
                     learningObjective = metadata.learningObjective,
                     points = metadata.points,
                     answerType = metadata.answerType,
-                    gradingMethod = metadata.gradingMethod
+                    gradingMethod = metadata.gradingMethod,
+                    sourceType = metadata.sourceType
                 )
             }
 
@@ -1111,16 +1112,67 @@ class AssignmentService(
                 answerKey = assignment.answerKey
             )
 
+        val learningMaterial =
+            extractLearningMaterial(
+                content = assignment.content
+            )
+
         return AIService.GeneratedAssignment(
             title = assignment.title,
+            learningMaterial = learningMaterial,
             questions = questions,
             answerKey = answerKey,
             gradingGuide = assignment.gradingGuide,
             totalScore = assignment.totalScore
         )
     }
+    private fun extractLearningMaterial(
+        content: String
+    ): String? {
 
+        val startMarker =
+            "=== NỘI DUNG BÀI HỌC / BÀI ĐỌC ==="
 
+        val endMarker =
+            "=== CÂU HỎI ==="
+
+        val start =
+            content.indexOf(startMarker)
+
+        if (start < 0) {
+            return null
+        }
+
+        val materialStart =
+            start + startMarker.length
+
+        val end =
+            content.indexOf(
+                endMarker,
+                materialStart
+            )
+
+        val material =
+            if (end >= 0) {
+
+                content.substring(
+                    materialStart,
+                    end
+                )
+
+            } else {
+
+                content.substring(
+                    materialStart
+                )
+            }
+
+        return material
+            .trim()
+            .takeIf {
+                it.isNotBlank()
+            }
+    }
     // ============================================================
     // PARSE STORED ANSWER KEY
     // ============================================================
@@ -1633,5 +1685,52 @@ class AssignmentService(
                 .limit(1)
                 .count() > 0
         }
+    }
+    private fun buildAssignmentContent(
+        assignment: AIService.GeneratedAssignment
+    ): String {
+
+        val builder = StringBuilder()
+
+        val material =
+            assignment.learningMaterial
+                ?.trim()
+                ?.takeIf { it.isNotBlank() }
+
+        if (material != null) {
+
+            builder.appendLine(
+                "=== NỘI DUNG BÀI HỌC / BÀI ĐỌC ==="
+            )
+
+            builder.appendLine()
+
+            builder.appendLine(material)
+
+            builder.appendLine()
+
+            builder.appendLine(
+                "=== CÂU HỎI ==="
+            )
+
+            builder.appendLine()
+        }
+
+        assignment.questions.forEach { question ->
+
+            builder.appendLine(
+                "Câu ${question.id} (${question.points} điểm):"
+            )
+
+            builder.appendLine(
+                question.question
+            )
+
+            builder.appendLine()
+        }
+
+        return builder
+            .toString()
+            .trim()
     }
 }
