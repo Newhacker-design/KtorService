@@ -1,12 +1,12 @@
 package com.example.ktorservice.config
 
+import com.example.ktorservice.database.DeviceControlsTable
 import com.example.ktorservice.database.VideosTable
 import com.example.ktorservice.database.DevicesTable
 import com.example.ktorservice.database.LicensesTable
 import com.example.ktorservice.database.SessionsTable
 import com.example.ktorservice.database.UsersTable
 import com.example.ktorservice.database.table.AssignmentsTable
-import com.example.ktorservice.database.table.DeviceControlsTable
 import com.example.ktorservice.database.table.LocationTable
 import com.example.ktorservice.database.table.ParentChildrenTable
 import com.example.ktorservice.database.table.UserAssignmentsTable

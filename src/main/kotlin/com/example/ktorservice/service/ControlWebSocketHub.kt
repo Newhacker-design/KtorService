@@ -13,6 +13,12 @@ data class ControlChangedEvent(
     val version: Long
 )
 
+@Serializable
+data class VideoChangedEvent(
+    val type: String = "VIDEO_CHANGED",
+    val version: Long
+)
+
 object ControlWebSocketHub {
 
     private val sessions =
@@ -27,7 +33,6 @@ object ControlWebSocketHub {
         childUserId: Int,
         session: WebSocketSession
     ) {
-
         val set =
             sessions.computeIfAbsent(
                 childUserId
@@ -42,7 +47,6 @@ object ControlWebSocketHub {
         childUserId: Int,
         session: WebSocketSession
     ) {
-
         val set =
             sessions[childUserId]
                 ?: return
@@ -54,11 +58,16 @@ object ControlWebSocketHub {
         }
     }
 
+    /**
+     * Thông báo Control đã thay đổi.
+     *
+     * Receiver nhận event này rồi gọi:
+     * GET /control/state
+     */
     suspend fun notifyChanged(
         childUserId: Int,
         version: Long
     ) {
-
         val set =
             sessions[childUserId]
                 ?: return
@@ -70,17 +79,59 @@ object ControlWebSocketHub {
                 )
             )
 
+        sendToSessions(
+            childUserId = childUserId,
+            set = set,
+            message = message
+        )
+    }
+
+    /**
+     * Thông báo video mới đã được upload.
+     *
+     * Receiver nhận event này rồi gọi:
+     * VideoSyncManager.sync()
+     */
+    suspend fun notifyVideoChanged(
+        childUserId: Int,
+        version: Long
+    ) {
+        val set =
+            sessions[childUserId]
+                ?: return
+
+        val message =
+            json.encodeToString(
+                VideoChangedEvent(
+                    version = version
+                )
+            )
+
+        sendToSessions(
+            childUserId = childUserId,
+            set = set,
+            message = message
+        )
+    }
+
+    /**
+     * Gửi message tới toàn bộ WebSocket session
+     * của một child.
+     *
+     * Session lỗi sẽ được tự động loại bỏ.
+     */
+    private suspend fun sendToSessions(
+        childUserId: Int,
+        set: MutableSet<WebSocketSession>,
+        message: String
+    ) {
         val deadSessions =
             mutableListOf<WebSocketSession>()
 
         for (session in set) {
-
             try {
-
                 session.send(message)
-
             } catch (e: Exception) {
-
                 deadSessions.add(session)
             }
         }

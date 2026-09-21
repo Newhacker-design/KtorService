@@ -45,8 +45,6 @@ import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 import io.ktor.utils.io.jvm.javaio.toInputStream
-import io.ktor.server.http.content.staticFiles
-import io.ktor.server.http.content.default
 import kotlinx.coroutines.sync.Semaphore
 import org.jetbrains.exposed.sql.SortOrder
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
@@ -58,7 +56,7 @@ import org.jetbrains.exposed.sql.transactions.transaction
 import java.time.ZoneId
 import java.time.ZonedDateTime
 import java.util.concurrent.ConcurrentHashMap
-import com.example.ktorservice.database.table.DeviceControlsTable
+import com.example.ktorservice.database.DeviceControlsTable
 import com.example.ktorservice.service.ControlWebSocketHub
 import org.jetbrains.exposed.sql.update
 import io.ktor.server.websocket.webSocket
@@ -1012,6 +1010,9 @@ fun Route.viewedItemRoutes(
             var uploadSucceeded =
                 false
 
+            var uploadedVideoVersion =
+                0L
+
             // ============================================================
             // CRITICAL SECTION
             // ============================================================
@@ -1221,12 +1222,12 @@ fun Route.viewedItemRoutes(
                             )
 
                             // =============================================
-                            // START COOLDOWN
-                            //
-                            // Chỉ ghi cooldown sau khi:
-                            // - file đã lưu
-                            // - DB đã insert thành công
-                            // =============================================
+// START COOLDOWN
+//
+// Chỉ ghi cooldown sau khi:
+// - file đã lưu
+// - DB đã insert thành công
+// =============================================
 
                             lastVideoUploadTime[
                                 parentUserId
@@ -1235,24 +1236,51 @@ fun Route.viewedItemRoutes(
 
                             println(
                                 "UPLOAD COOLDOWN STARTED: " +
-                                        "30 seconds"
+                                        "120 seconds"
                             )
 
-                            // =============================================
-                            // CLEANUP
-                            //
-                            // GLOBAL SERVER = 10 VIDEO
-                            // =============================================
+// =============================================
+// CLEANUP
+//
+// GLOBAL SERVER = 10 VIDEO
+// =============================================
 
                             cleanupOldVideos()
 
-                            uploadSucceeded =
-                                true
+// =============================================
+// UPLOAD HOÀN TẤT
+// =============================================
+                            uploadedVideoVersion = createdAt
+
+                            uploadSucceeded = true
+
+
                         }
                     }
                 }
             }
+// ============================================================
+// NOTIFY RECEIVER
+//
+// QUAN TRỌNG:
+// notifyVideoChanged() là suspend function.
+//
+// Vì vậy phải gọi SAU KHI thoát synchronized(uploadLock).
+// ============================================================
 
+            if (uploadSucceeded) {
+
+                ControlWebSocketHub.notifyVideoChanged(
+                    childUserId = targetChildUserId,
+                    version = uploadedVideoVersion
+                )
+
+                println(
+                    "VIDEO_CHANGED SENT: " +
+                            "child=$targetChildUserId " +
+                            "version=$uploadedVideoVersion"
+                )
+            }
             // ============================================================
             // RESPOND SAU KHI THOÁT SYNCHRONIZED
             //
