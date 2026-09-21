@@ -30,6 +30,9 @@ object UserAssignmentsTable : Table("user_assignments") {
         text("feedback")
             .nullable()
 
+    val gradingDetails =
+        text("grading_details")
+            .nullable()
     val startedAt =
         long("started_at")
             .nullable()

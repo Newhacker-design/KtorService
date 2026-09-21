@@ -136,7 +136,6 @@ fun Route.assignmentRoutes(
     //
     // Assignment được lưu vào user_assignments với:
     //     userId = childUserId
-    // ============================================================
 
     get("/assignments/next") {
 
@@ -457,6 +456,9 @@ fun Route.assignmentRoutes(
 
                     feedback =
                         result.feedback,
+
+                    gradingDetails =
+                        result.gradingDetails,
 
                     startedAt =
                         result.startedAt,
@@ -1093,6 +1095,9 @@ fun Route.assignmentRoutes(
                         feedback =
                             result.feedback,
 
+                        gradingDetails =
+                            result.gradingDetails,
+
                         startedAt =
                             result.startedAt,
 
@@ -1387,6 +1392,7 @@ fun Route.assignmentRoutes(
                     status = result.status,
                     score = result.score,
                     feedback = result.feedback,
+                    gradingDetails = result.gradingDetails,
                     message =
                         "Assignment submitted successfully"
                 )

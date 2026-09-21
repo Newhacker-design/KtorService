@@ -2902,110 +2902,206 @@ FAIL.
             Grading method:
             ${q.gradingMethod}
             """.trimIndent()
-
             }
 
         return """
-        Bạn là giáo viên chấm bài.
+    Bạn là giáo viên chấm bài cho học sinh.
 
-        === ASSIGNMENT ===
-        Title:
-        ${assignment.title}
+    Nhiệm vụ của bạn không chỉ là cho điểm.
+    Bạn phải:
+    1. Chấm chính xác từng câu.
+    2. Xác định học sinh đúng, sai hoặc đúng một phần.
+    3. Nếu sai, phải chỉ rõ học sinh sai ở đâu.
+    4. Giải thích tại sao cách làm hoặc câu trả lời đó sai.
+    5. Hướng dẫn cách làm đúng hoặc cách sửa.
+    6. Nếu đúng, giải thích ngắn gọn vì sao đúng để học sinh củng cố kiến thức.
+    7. Feedback phải mang tính giảng dạy, giúp học sinh học được từ lỗi sai.
+    8. Không được bịa thêm dữ kiện hoặc kiến thức không cần thiết.
 
-        === LEARNING MATERIAL ===
-        $material
+    === ASSIGNMENT ===
 
-        === QUESTIONS ===
-        $questions
+    Title:
+    ${assignment.title}
 
-        === GRADING GUIDE ===
-        ${assignment.gradingGuide}
+    === LEARNING MATERIAL ===
 
-        === TOTAL SCORE ===
-        ${assignment.totalScore}
+    $material
 
-        === STUDENT ANSWER ===
-        $studentAnswer
+    === QUESTIONS ===
 
-        === RULES ===
+    $questions
 
-        1. NGUYÊN TẮC CHẤM
-        - Chấm đúng theo câu hỏi, answerKey, learningObjective và gradingGuide.
-        - Không thay đổi thang điểm.
-        - Điểm tối đa là ${assignment.totalScore}.
-        - Nếu học sinh đúng một phần, cho điểm tương ứng.
-        - Chấp nhận cách diễn đạt khác answerKey nếu nội dung và ý nghĩa đúng.
-        - Không phạt chỉ vì học sinh dùng từ khác answerKey.
-        - Không tự tạo dữ kiện không có trong assignment.
-        - Không đoán ý học sinh ngoài nội dung studentAnswer.
-        - Feedback phải ngắn, rõ và phù hợp với học sinh.
+    === GRADING GUIDE ===
 
-        2. SOURCE TYPE
+    ${assignment.gradingGuide}
 
-        SELF_CONTAINED:
-        - Câu hỏi phải được chấm dựa trên chính nội dung câu hỏi,
-          answerKey và kiến thức cần thiết đã được xác định trong assignment.
-        - Không cần learningMaterial để chấm.
+    === TOTAL SCORE ===
 
-        LESSON_CONTENT:
-        - Nếu câu hỏi yêu cầu kiến thức từ learningMaterial,
-          phải sử dụng learningMaterial làm nguồn ngữ cảnh chính.
-        - Không tự bổ sung thông tin từ Internet hoặc nguồn ngoài
-          nếu learningMaterial đã cung cấp đủ thông tin.
-        - Nếu câu trả lời phù hợp với nội dung learningMaterial,
-          phải công nhận dù cách diễn đạt khác answerKey.
+    ${assignment.totalScore}
 
-        READING_PASSAGE:
-        - Câu trả lời phải được đánh giá dựa trên learningMaterial.
-        - Với câu hỏi đọc hiểu, chỉ chấp nhận thông tin có trong bài đọc
-          hoặc suy luận hợp lý trực tiếp từ bài đọc.
-        - Không yêu cầu học sinh biết thêm thông tin ngoài bài đọc.
-        - Nếu học sinh trả lời đúng dựa trên bài đọc nhưng dùng cách diễn đạt
-          khác answerKey, vẫn phải cho điểm tương ứng.
+    === STUDENT ANSWER ===
 
-        3. LEARNING MATERIAL
-        - learningMaterial chỉ là nguồn ngữ cảnh khi câu hỏi yêu cầu.
-        - Không coi việc learningMaterial không tồn tại là lỗi đối với
-          câu hỏi SELF_CONTAINED.
-        - Nếu câu hỏi là LESSON_CONTENT hoặc READING_PASSAGE nhưng
-          learningMaterial bị thiếu, không được tự bịa nội dung còn thiếu.
-        - Không dùng thông tin ngoài assignment để "sửa" một câu hỏi
-          hoặc answerKey bị thiếu dữ kiện.
+    $studentAnswer
 
-        4. CHẤM ĐIỂM
-        Nếu studentAnswer đúng:
-        - cho điểm đầy đủ.
+    === RULES ===
 
-        Nếu đúng một phần:
-        - cho điểm tương ứng với phần kiến thức/kỹ năng đúng.
+    1. NGUYÊN TẮC CHẤM
 
-        Nếu sai:
-        - điểm thấp hoặc 0 tùy mức độ;
-        - feedback chỉ ra kiến thức hoặc cách suy luận cần sửa.
+    - Chấm đúng theo câu hỏi, answerKey, learningObjective và gradingGuide.
+    - Không thay đổi thang điểm.
+    - Tổng điểm tối đa là ${assignment.totalScore}.
+    - Điểm của từng câu không được vượt quá số points của câu đó.
+    - Tổng điểm phải bằng tổng điểm các câu.
+    - Nếu học sinh đúng hoàn toàn, cho đầy đủ điểm.
+    - Nếu học sinh đúng một phần, cho điểm tương ứng với phần kiến thức/kỹ năng đúng.
+    - Nếu học sinh sai hoàn toàn, cho 0 điểm.
+    - Chấp nhận cách diễn đạt khác answerKey nếu nội dung và ý nghĩa đúng.
+    - Không phạt chỉ vì học sinh dùng từ khác answerKey.
+    - Không đoán ý học sinh ngoài nội dung studentAnswer.
+    - Không tự tạo dữ kiện không có trong assignment.
 
-        Nếu studentAnswer bỏ trống:
-        - cho 0 điểm;
-        - feedback ngắn gọn cho biết học sinh chưa trả lời.
+    2. ĐÁNH GIÁ TỪNG CÂU
 
-        5. KHÔNG SUY DIỄN QUÁ MỨC
-        - Không suy đoán ý định của học sinh.
-        - Không tự bổ sung câu trả lời còn thiếu.
-        - Không coi một câu trả lời mơ hồ là đúng nếu không có đủ căn cứ.
-        - Tuy nhiên, không được đánh sai chỉ vì học sinh diễn đạt khác
-          answerKey nhưng vẫn thể hiện đúng kiến thức.
+    Với MỖI câu hỏi, phải tạo một QuestionGradingResult.
 
-        6. OUTPUT
-        Chỉ trả về JSON hợp lệ, không markdown.
+    Feedback của từng câu phải:
 
+    - Nói rõ câu đó đúng, sai hoặc đúng một phần.
+    - Nếu đúng:
+      + giải thích ngắn gọn tại sao câu trả lời đúng;
+      + nhắc lại kiến thức hoặc quy tắc quan trọng nếu phù hợp.
+
+    - Nếu đúng một phần:
+      + chỉ rõ phần nào học sinh đã làm đúng;
+      + chỉ rõ phần nào còn thiếu hoặc sai;
+      + hướng dẫn phần cần sửa.
+
+    - Nếu sai:
+      + chỉ rõ lỗi cụ thể;
+      + giải thích nguyên nhân của lỗi;
+      + đưa ra cách làm đúng;
+      + nếu là bài toán, nên trình bày các bước giải ngắn gọn;
+      + không chỉ nói "sai" hoặc "chưa chính xác".
+
+    - Nếu bỏ trống:
+      + cho 0 điểm;
+      + nói rằng học sinh chưa trả lời;
+      + đưa ra hướng dẫn hoặc đáp án giải thích ngắn gọn để học sinh học được.
+
+    3. GIẢI THÍCH PHẢI DỰA TRÊN BÀI TẬP
+
+    - Giải thích phải dựa trên question, answerKey, learningObjective,
+      gradingGuide và learningMaterial khi phù hợp.
+    - Không sử dụng thông tin ngoài assignment nếu không cần thiết.
+    - Không bịa lời giải.
+    - Không thay đổi đáp án đúng chỉ để khớp với studentAnswer.
+
+    4. SOURCE TYPE
+
+    SELF_CONTAINED:
+    - Chấm dựa trên chính nội dung câu hỏi, answerKey,
+      learningObjective và gradingGuide.
+    - Không cần learningMaterial để chấm.
+
+    LESSON_CONTENT:
+    - Nếu câu hỏi yêu cầu kiến thức từ learningMaterial,
+      sử dụng learningMaterial làm nguồn ngữ cảnh chính.
+    - Không tự bổ sung thông tin từ Internet hoặc nguồn ngoài
+      nếu learningMaterial đã cung cấp đủ thông tin.
+    - Nếu câu trả lời phù hợp với learningMaterial,
+      phải công nhận dù cách diễn đạt khác answerKey.
+
+    READING_PASSAGE:
+    - Đánh giá dựa trên learningMaterial.
+    - Với câu hỏi đọc hiểu, chỉ chấp nhận thông tin có trong bài đọc
+      hoặc suy luận hợp lý trực tiếp từ bài đọc.
+    - Không yêu cầu học sinh biết thêm thông tin ngoài bài đọc.
+    - Nếu học sinh trả lời đúng dựa trên bài đọc nhưng dùng cách diễn đạt
+      khác answerKey, vẫn phải cho điểm tương ứng.
+
+    5. LEARNING MATERIAL
+
+    - learningMaterial chỉ là nguồn ngữ cảnh khi câu hỏi yêu cầu.
+    - Không coi learningMaterial không tồn tại là lỗi đối với SELF_CONTAINED.
+    - Nếu câu hỏi là LESSON_CONTENT hoặc READING_PASSAGE nhưng
+      learningMaterial bị thiếu, không được tự bịa nội dung còn thiếu.
+
+    6. KHÔNG SUY DIỄN QUÁ MỨC
+
+    - Không suy đoán ý định của học sinh.
+    - Không tự bổ sung câu trả lời còn thiếu.
+    - Không coi câu trả lời mơ hồ là đúng nếu không có đủ căn cứ.
+    - Tuy nhiên, không được đánh sai chỉ vì học sinh diễn đạt khác
+      answerKey nhưng vẫn thể hiện đúng kiến thức.
+
+    7. NGÔN NGỮ FEEDBACK
+
+    Feedback phải viết bằng tiếng Việt.
+
+    Feedback dành cho học sinh, không phải báo cáo kỹ thuật.
+
+    Không dùng các câu chung chung như:
+    - "Sai."
+    - "Chưa đúng."
+    - "Cần cố gắng."
+    - "Đáp án chưa chính xác."
+
+    Nếu câu trả lời sai, phải nói rõ:
+    - Sai ở đâu?
+    - Vì sao sai?
+    - Cách làm đúng là gì?
+
+    Nếu câu trả lời đúng, không cần viết quá dài nhưng nên củng cố
+    kiến thức quan trọng.
+
+    8. FEEDBACK TỔNG QUAN
+
+    Trường "feedback" cấp assignment phải là nhận xét tổng quan.
+
+    Feedback tổng quan cần:
+    - nhận xét kết quả chung;
+    - nêu điểm mạnh;
+    - nêu lỗi hoặc kiến thức cần cải thiện;
+    - đưa ra một lời khuyên học tập ngắn gọn.
+
+    Không lặp lại toàn bộ feedback của từng câu trong feedback tổng quan.
+
+    9. OUTPUT
+
+    Chỉ trả về JSON hợp lệ.
+    Không markdown.
+    Không thêm text bên ngoài JSON.
+
+    JSON bắt buộc có cấu trúc:
+
+    {
+      "score": 0,
+      "feedback": "...",
+      "questions": [
         {
+          "id": 1,
           "score": 0,
           "feedback": "..."
         }
-
-        score phải nằm trong khoảng:
-        0 <= score <= ${assignment.totalScore}
-    """.trimIndent()
+      ]
     }
+
+    Quy tắc output:
+
+    - Phải có đúng một phần tử trong "questions" cho MỖI câu hỏi.
+    - "id" phải đúng với id của câu hỏi.
+    - Không được bỏ sót câu hỏi.
+    - Không được tạo thêm câu hỏi không tồn tại.
+    - "score" của mỗi câu không được vượt quá points của câu đó.
+    - "score" tổng phải nằm trong khoảng:
+      0 <= score <= ${assignment.totalScore}
+
+    - "score" tổng phải bằng tổng score của các câu.
+    - Tất cả score phải là số hữu hạn.
+    - Feedback phải là chuỗi tiếng Việt.
+""".trimIndent()
+    }
+
 
 
     private fun buildSexEducationGradingPrompt(
@@ -3234,12 +3330,57 @@ FAIL.
             )
         }
 
+        val questions =
+            root["questions"]
+                ?.jsonArray
+                ?.map { element ->
+
+                    val question =
+                        element.jsonObject
+
+                    val id =
+                        question["id"]
+                            ?.jsonPrimitive
+                            ?.intOrNull
+                            ?: throw IllegalStateException(
+                                "Question grading missing id"
+                            )
+
+                    val questionScore =
+                        question["score"]
+                            ?.jsonPrimitive
+                            ?.doubleOrNull
+                            ?: throw IllegalStateException(
+                                "Question grading missing score for id=$id"
+                            )
+
+                    val questionFeedback =
+                        question["feedback"]
+                            ?.jsonPrimitive
+                            ?.contentOrNull
+                            ?: ""
+
+                    if (!questionScore.isFinite()) {
+                        throw IllegalStateException(
+                            "Question score is not finite for id=$id"
+                        )
+                    }
+
+                    QuestionGradingResult(
+                        id = id,
+                        score = questionScore,
+                        feedback = questionFeedback
+                    )
+                }
+                ?: emptyList()
+
         return GradingResult(
             score = score,
             feedback = feedback,
-            questions = emptyList()
+            questions = questions
         )
     }
+
 
     private fun buildLearningStepContext(
         learningStepTitle: String?,

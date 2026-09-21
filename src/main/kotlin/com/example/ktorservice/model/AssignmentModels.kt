@@ -62,29 +62,21 @@ data class AssignmentDetailResponse(
 )
 @Serializable
 data class UserAssignmentResponse(
-
     val success: Boolean,
-
     val id: Int? = null,
-
     val assignmentId: Int? = null,
-
     val userId: Int? = null,
-
     val status: String? = null,
-
     val answer: String? = null,
-
     val score: Double? = null,
-
     val feedback: String? = null,
 
+    // JSON chứa kết quả chấm từng câu
+    val gradingDetails: String? = null,
+
     val startedAt: Long? = null,
-
     val completedAt: Long? = null,
-
     val assignment: AssignmentStudentData? = null,
-
     val message: String? = null
 )
 
@@ -136,7 +128,10 @@ data class AssignmentActionResponse(
     val message: String? = null,
     val status: String? = null,
     val score: Double? = null,
-    val feedback: String? = null
+    val feedback: String? = null,
+
+    // JSON chứa kết quả chấm từng câu
+    val gradingDetails: String? = null
 )
 
 @Serializable
