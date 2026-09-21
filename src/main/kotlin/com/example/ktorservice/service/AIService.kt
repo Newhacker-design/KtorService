@@ -15,6 +15,7 @@ class AIService {
 
 
     private val sourceReferencePatterns = listOf(
+        // ----- Các pattern cũ -----
         Regex("""\bđoạn\s+văn\s+(trên|dưới|sau|đây)\b""", RegexOption.IGNORE_CASE),
         Regex("""\bbài\s+(đọc|học)\s+(trên|dưới|sau|đây)\b""", RegexOption.IGNORE_CASE),
         Regex("""\bnội\s+dung\s+(trên|dưới|sau|đây)\b""", RegexOption.IGNORE_CASE),
@@ -22,8 +23,27 @@ class AIService {
         Regex("""\bhình\s+(trên|dưới|sau|đây)\b""", RegexOption.IGNORE_CASE),
         Regex("""\bdựa\s+vào\s+(đoạn|bài|nội\s+dung|bảng|hình)\b""", RegexOption.IGNORE_CASE),
         Regex("""\bđọc\s+(đoạn\s+văn|bài\s+đọc)\b""", RegexOption.IGNORE_CASE),
-        Regex("""\btheo\s+(nội\s+dung|bài\s+học|đoạn\s+văn)\b""", RegexOption.IGNORE_CASE)
-    )
+        Regex("""\btheo\s+(nội\s+dung|bài\s+học|đoạn\s+văn)\b""", RegexOption.IGNORE_CASE),
+
+        // ----- MỚI: đại từ chỉ định sau tên thể loại -----
+        // "truyện này", "bài thơ sau", "đoạn trích dưới"...
+        Regex(
+            """\b(?i:câu\s+chuyện|truyện|bài\s+thơ|đoạn\s+thơ|bài\s+văn|đoạn\s+trích|tác\s+phẩm|bài\s+đọc)\s+(?:trên|dưới|sau|đây|này|kia|đó)\b"""
+        ),
+
+        // ----- MỚI: gọi tên tác phẩm cụ thể -----
+        // "câu chuyện Rùa và Thỏ", "truyện Thánh Gióng",
+        // "bài thơ Lượm", "từ câu chuyện rùa và thỏ..."
+        // Bỏ qua các đại từ/động từ chung để tránh false positive.
+        Regex(
+            """\b(?i:câu\s+chuyện|truyện|bài\s+thơ|đoạn\s+thơ|bài\s+văn|đoạn\s+trích|tác\s+phẩm|bài\s+đọc)\s+(?:kể\s+về\s+|về\s+|của\s+)?(?!nào\b|gì\b|em\b|bạn\b|con\b|mình\b|chúng\b|hãy\b|kể\b|viết\b|bản\s+thân\b|ai\b|đó\b|này\b|kia\b|trên\b|dưới\b|sau\b|đây\b|trước\b)\S"""
+        ),
+
+        // ----- MỚI: tên tác phẩm được trích dẫn trong ngoặc kép -----
+        Regex(
+            """\b(?i:câu\s+chuyện|truyện|bài\s+thơ|đoạn\s+thơ|bài\s+văn|đoạn\s+trích|tác\s+phẩm|bài\s+đọc)\s*[\u0022\u201C\u201D]"""
+        ),
+)
 
 // ============================================================
 // PUBLIC API / MODELS
@@ -720,6 +740,19 @@ class AIService {
         3. READING_PASSAGE
         - Câu hỏi đọc hiểu.
         - BẮT BUỘC có learningMaterial chứa đầy đủ bài đọc.
+         - TUYỆT ĐỐI KHÔNG được tham chiếu tới một tác phẩm/truyện/bài thơ
+          cụ thể (ví dụ: "câu chuyện Rùa và Thỏ", "truyện Thánh Gióng",
+          "bài thơ Lượm") nếu tác phẩm đó KHÔNG được cung cấp đầy đủ
+          trong learningMaterial.
+
+        - Nếu muốn hỏi dựa trên một câu chuyện/bài thơ cụ thể, BẮT BUỘC:
+          + cung cấp TOÀN BỘ nội dung (hoặc đoạn trích đầy đủ) trong
+            learningMaterial, VÀ
+          + đặt sourceType = READING_PASSAGE (hoặc LESSON_CONTENT).
+
+        - Nếu không muốn cung cấp nội dung, phải tự tóm tắt/viết lại
+          câu chuyện ngay trong câu hỏi (sourceType = SELF_CONTAINED),
+          không được viện dẫn tên tác phẩm bên ngoài.
 
         QUY TẮC BẮT BUỘC:
 
@@ -2655,7 +2688,14 @@ FAIL.
 
         14. EXTERNAL REFERENCE CHECK
 
-        FAIL nếu câu hỏi sử dụng các kiểu:
+         FAIL nếu câu hỏi gọi tên một tác phẩm/truyện/bài thơ cụ thể
+        (ví dụ: "câu chuyện Rùa và Thỏ", "truyện Thánh Gióng",
+        "bài thơ Lượm", "tác phẩm Tắt đèn"...) mà learningMaterial
+        không chứa nội dung tương ứng.
+
+        Không được PASS chỉ vì AI ghi sourceType = SELF_CONTAINED
+        trong khi câu hỏi vẫn yêu cầu học sinh biết nội dung
+        của một tác phẩm bên ngoài.
 
         - "Đọc đoạn văn trên..."
         - "Dựa vào bài học trên..."
