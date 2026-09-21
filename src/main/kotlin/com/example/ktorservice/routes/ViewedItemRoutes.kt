@@ -58,6 +58,14 @@ import org.jetbrains.exposed.sql.transactions.transaction
 import java.time.ZoneId
 import java.time.ZonedDateTime
 import java.util.concurrent.ConcurrentHashMap
+import com.example.ktorservice.database.table.DeviceControlsTable
+import com.example.ktorservice.service.ControlWebSocketHub
+import org.jetbrains.exposed.sql.update
+import io.ktor.server.websocket.webSocket
+import io.ktor.websocket.Frame
+import io.ktor.websocket.close
+import io.ktor.websocket.readText
+
 
 private const val MAX_LOCATIONS = 50
 private const val MAX_VIDEOS = 10
@@ -95,8 +103,7 @@ fun Route.viewedItemRoutes(
 ) {
     val callEvents = mutableListOf<CallEventRequest>()
 
-    val currentControls =
-        ConcurrentHashMap<Int, ControlResponse>()
+
 
 
     post("/control") {
@@ -104,7 +111,7 @@ fun Route.viewedItemRoutes(
         try {
 
             // ============================================================
-            // PARENT ID LẤY TỪ JWT
+            // PARENT ID
             // ============================================================
 
             val parentUserId =
@@ -127,38 +134,14 @@ fun Route.viewedItemRoutes(
             val body =
                 call.receiveText()
 
-            println(
-                "========== POST /control =========="
-            )
-
-            println(
-                "PARENT USER ID = $parentUserId"
-            )
-
-            println(
-                "BODY = $body"
-            )
-
             val request =
                 Json.decodeFromString<ControlRequest>(
                     body
                 )
 
-            /*
-
- * ============================================================
- * VALIDATE COMMAND
- * ============================================================
- *
- * Các command hợp lệ:
- *
- * ON
- * OFF
- * LOGOUT
- *
- * LOGOUT chỉ có ý nghĩa đối với Receiver.
- * Parent vẫn phải sở hữu child tương ứng.
-   */
+            // ============================================================
+            // VALIDATE COMMAND
+            // ============================================================
 
             val command =
                 request.command
@@ -171,15 +154,12 @@ fun Route.viewedItemRoutes(
                 command != "LOGOUT"
             ) {
 
-
                 call.respond(
                     HttpStatusCode.BadRequest,
                     "command must be ON, OFF or LOGOUT"
                 )
 
                 return@post
-
-
             }
 
             // ============================================================
@@ -202,39 +182,105 @@ fun Route.viewedItemRoutes(
             }
 
             // ============================================================
-            // SAVE COMMAND
+            // SAVE TO POSTGRESQL
             // ============================================================
+
+            val now =
+                System.currentTimeMillis()
+
+            val newVersion =
+                transaction {
+
+                    val existing =
+                        DeviceControlsTable
+                            .selectAll()
+                            .where {
+                                DeviceControlsTable.childUserId eq
+                                        request.childUserId
+                            }
+                            .singleOrNull()
+
+                    if (existing == null) {
+
+                        DeviceControlsTable.insert {
+                            it[childUserId] =
+                                request.childUserId
+
+                            it[DeviceControlsTable.command] =
+                                command
+
+                            it[text] =
+                                request.text
+
+                            it[videoUrl] =
+                                request.videoUrl
+
+                            it[version] =
+                                1L
+
+                            it[updatedAt] =
+                                now
+                        }
+
+                        1L
+
+                    } else {
+
+                        val nextVersion =
+                            existing[
+                                DeviceControlsTable.version
+                            ] + 1L
+
+                        DeviceControlsTable.update(
+                            where = {
+                                DeviceControlsTable.childUserId eq
+                                        request.childUserId
+                            }
+                        ) {
+
+                            it[DeviceControlsTable.command] =
+                                command
+
+                            it[text] =
+                                request.text
+
+                            it[videoUrl] =
+                                request.videoUrl
+
+                            it[version] =
+                                nextVersion
+
+                            it[updatedAt] =
+                                now
+                        }
+
+                        nextVersion
+                    }
+                }
 
             val control =
                 ControlResponse(
                     command = command,
                     text = request.text,
-                    videoUrl = request.videoUrl
+                    videoUrl = request.videoUrl,
+                    version = newVersion
                 )
 
+            // ============================================================
+            // PUSH CHANGE TO RECEIVER
+            // ============================================================
 
-            currentControls[
-                request.childUserId
-            ] = control
-
-            println(
-                "parentUserId = $parentUserId"
+            ControlWebSocketHub.notifyChanged(
+                childUserId = request.childUserId,
+                version = newVersion
             )
 
             println(
-                "childUserId = ${request.childUserId}"
-            )
-
-            println(
-                "command = ${request.command}"
-            )
-
-            println(
-                "text = ${request.text}"
-            )
-
-            println(
-                "videoUrl = ${request.videoUrl}"
+                "CONTROL SAVED: " +
+                        "parent=$parentUserId " +
+                        "child=${request.childUserId} " +
+                        "command=$command " +
+                        "version=$newVersion"
             )
 
             call.respond(
@@ -248,14 +294,6 @@ fun Route.viewedItemRoutes(
                 "========== CONTROL ERROR =========="
             )
 
-            println(
-                "Exception = ${e::class.qualifiedName}"
-            )
-
-            println(
-                "Message = ${e.message}"
-            )
-
             e.printStackTrace()
 
             call.respond(
@@ -266,18 +304,9 @@ fun Route.viewedItemRoutes(
     }
 
 
-
-    get("/control") {
-
-        println(
-            "========== GET /control =========="
-        )
+    get("/control/state") {
 
         try {
-
-            // ============================================================
-            // CHILD ID LẤY TỪ JWT
-            // ============================================================
 
             val childUserId =
                 call.requireUserId(authService)
@@ -292,35 +321,47 @@ fun Route.viewedItemRoutes(
                 return@get
             }
 
-            // ============================================================
-            // LẤY COMMAND RIÊNG CỦA CHILD
-            // ============================================================
-
             val control =
-                currentControls[
-                    childUserId
-                ]
+                transaction {
+
+                    DeviceControlsTable
+                        .selectAll()
+                        .where {
+                            DeviceControlsTable.childUserId eq
+                                    childUserId
+                        }
+                        .singleOrNull()
+                        ?.let { row ->
+
+                            ControlResponse(
+                                command =
+                                    row[
+                                        DeviceControlsTable.command
+                                    ],
+
+                                text =
+                                    row[
+                                        DeviceControlsTable.text
+                                    ],
+
+                                videoUrl =
+                                    row[
+                                        DeviceControlsTable.videoUrl
+                                    ],
+
+                                version =
+                                    row[
+                                        DeviceControlsTable.version
+                                    ]
+                            )
+                        }
+                }
                     ?: ControlResponse(
                         command = "",
                         text = "",
-                        videoUrl = null
+                        videoUrl = null,
+                        version = 0L
                     )
-
-            println(
-                "childUserId = $childUserId"
-            )
-
-            println(
-                "command = ${control.command}"
-            )
-
-            println(
-                "text = ${control.text}"
-            )
-
-            println(
-                "videoUrl = ${control.videoUrl}"
-            )
 
             call.respond(
                 HttpStatusCode.OK,
@@ -330,22 +371,94 @@ fun Route.viewedItemRoutes(
         } catch (e: Exception) {
 
             println(
-                "========== GET CONTROL ERROR =========="
-            )
-
-            println(
-                "Exception = ${e::class.qualifiedName}"
-            )
-
-            println(
-                "Message = ${e.message}"
+                "========== GET CONTROL STATE ERROR =========="
             )
 
             e.printStackTrace()
 
             call.respond(
                 HttpStatusCode.InternalServerError,
-                "Control error: ${e.message}"
+                "Control state error: ${e.message}"
+            )
+        }
+    }
+
+
+    webSocket("/control/ws") {
+
+        val childUserId =
+            call.requireUserId(authService)
+
+        if (childUserId == null) {
+
+            close(
+                reason = io.ktor.websocket.CloseReason(
+                    io.ktor.websocket.CloseReason.Codes.VIOLATED_POLICY,
+                    "Invalid or expired token"
+                )
+            )
+
+            return@webSocket
+        }
+
+        println(
+            "CONTROL WS CONNECTED: child=$childUserId"
+        )
+
+        ControlWebSocketHub.register(
+            childUserId = childUserId,
+            session = this
+        )
+
+        try {
+
+            // ============================================================
+            // CONNECTION ALIVE
+            // ============================================================
+
+            for (frame in incoming) {
+
+                when (frame) {
+
+                    is Frame.Text -> {
+
+                        // Client hiện tại không cần gửi command.
+                        // Chỉ giữ connection sống.
+                        println(
+                            "CONTROL WS TEXT: " +
+                                    "child=$childUserId " +
+                                    frame.readText()
+                        )
+                    }
+
+                    is Frame.Close -> {
+                        break
+                    }
+
+                    else -> {
+                        // Ignore binary/ping/pong.
+                    }
+                }
+            }
+
+        } catch (e: Exception) {
+
+            println(
+                "CONTROL WS ERROR: " +
+                        "child=$childUserId " +
+                        "${e.message}"
+            )
+
+        } finally {
+
+            ControlWebSocketHub.unregister(
+                childUserId = childUserId,
+                session = this
+            )
+
+            println(
+                "CONTROL WS DISCONNECTED: " +
+                        "child=$childUserId"
             )
         }
     }

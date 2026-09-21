@@ -16,10 +16,10 @@ kotlin {
     jvmToolchain(25)
 }
 
+
 dependencies {
 
     implementation(libs.ktor.server.config.yaml)
-
     implementation(libs.ktor.server.core)
     implementation(libs.ktor.server.netty)
 
@@ -28,8 +28,10 @@ dependencies {
 
     implementation(libs.ktor.server.callLogging)
     implementation(libs.ktor.server.statusPages)
-
     implementation(libs.ktor.server.cors)
+
+    // WebSocket
+    implementation("io.ktor:ktor-server-websockets:3.2.3")
 
     testImplementation(libs.ktor.server.testHost)
 
@@ -44,12 +46,17 @@ dependencies {
 
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.9.0")
 
-    testImplementation(kotlin("test"))
     implementation("org.postgresql:postgresql:42.7.7")
+
+    // Ktor client
     implementation("io.ktor:ktor-client-core:3.2.3")
     implementation("io.ktor:ktor-client-cio:3.2.3")
     implementation("io.ktor:ktor-client-content-negotiation:3.2.3")
+    implementation("io.ktor:ktor-client-websockets:3.2.3")
+
     implementation("org.mindrot:jbcrypt:0.4")
 
+    testImplementation(kotlin("test"))
 }
+
 

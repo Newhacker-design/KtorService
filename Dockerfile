@@ -9,7 +9,8 @@ COPY . .
 
 RUN chmod +x gradlew
 
-RUN ./gradlew buildFatJar --no-daemon
+RUN --mount=type=cache,target=/root/.gradle \
+    ./gradlew buildFatJar --no-daemon
 
 
 # ================================
