@@ -3002,8 +3002,13 @@ $learningStepContext
             }
 
         val answersText = assignment.answerKey
-            .joinToString("\n") {
-                "Answer ${it.id}: ${it.answer}"
+            .joinToString("\n") { answer ->
+                val question = assignment.questions.firstOrNull { it.id == answer.id }
+                val letter = answer.answer.trim().uppercase(Locale.ROOT)
+                val optionIndex = letter.singleOrNull()?.let { it - 'A' }
+                val keyedOption = question?.options?.getOrNull(optionIndex ?: -1)
+                    ?: "(không trỏ tới lựa chọn hợp lệ)"
+                "Answer ${answer.id}: $letter; option content by this key: $keyedOption"
             }
 
         val learningMaterialText =
@@ -3112,6 +3117,14 @@ $learningStepContext
 
         Nếu answerKey sai hoặc không trả lời đúng câu hỏi:
         FAIL.
+
+        Với TỪNG câu trắc nghiệm:
+        - tự giải câu hỏi độc lập;
+        - đối chiếu kết quả với nội dung lựa chọn A/B/C/D;
+        - xác nhận answerKey trỏ tới chính lựa chọn chứa đáp án đúng;
+        - xác nhận có đúng một lựa chọn đúng.
+        Nếu không có lựa chọn đúng, có nhiều lựa chọn đúng, hoặc answerKey trỏ sai chữ cái,
+        bắt buộc FAIL và ghi rõ ID câu cùng nội dung đáp án đúng cần có.
 
         ------------------------------------------------------------
 
@@ -3553,22 +3566,35 @@ FAIL.
 
         val questions =
             assignment.questions.joinToString("\n\n") { q ->
+                val answerKey = assignment.answerKey
+                    .firstOrNull { answer -> answer.id == q.id }
+                    ?.answer
+                    ?.trim()
+                    ?.uppercase(Locale.ROOT)
+                    .orEmpty()
+                val correctOption = answerKey.singleOrNull()
+                    ?.takeIf { it in 'A'..'D' }
+                    ?.let { letter -> q.options.getOrNull(letter - 'A') }
+                    .orEmpty()
+                val optionsText = q.options.mapIndexed { index, option ->
+                    "${('A'.code + index).toChar()}. $option"
+                }.ifEmpty { listOf("(câu này không có lựa chọn trắc nghiệm)") }
 
                 """
             Question ${q.id}:
             ${q.question}
 
+            Choices:
+            ${optionsText.joinToString("\n")}
+
             Source type:
             ${q.sourceType}
 
             Expected answer:
-            ${
-                    assignment.answerKey
-                        .firstOrNull { a ->
-                            a.id == q.id
-                        }
-                        ?.answer ?: ""
-                }
+            $answerKey
+
+            Expected choice content according to the answer key:
+            ${correctOption.ifBlank { "(not applicable)" }}
 
             Learning objective:
             ${q.learningObjective}
@@ -3660,6 +3686,7 @@ FAIL.
       + chỉ rõ lỗi cụ thể;
       + giải thích nguyên nhân của lỗi;
       + đưa ra cách làm đúng;
+      + nếu là trắc nghiệm, nêu chữ cái và nội dung phương án đúng theo answerKey;
       + nếu là bài toán, nên trình bày các bước giải ngắn gọn;
       + không chỉ nói "sai" hoặc "chưa chính xác".
 
