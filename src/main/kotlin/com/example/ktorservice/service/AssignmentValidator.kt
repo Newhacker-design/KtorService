@@ -71,10 +71,23 @@ object AssignmentValidator {
         answerKey: List<AIService.GeneratedAnswer>,
         gradingGuide: String,
         totalScore: Double,
-        learningMaterial: String? = null
+        learningMaterial: String? = null,
+        grade: Int? = null,
+        subject: String? = null
     ): ValidationResult {
 
         val errors = mutableListOf<String>()
+        val isMath = subject?.trim()?.lowercase() in setOf("math", "mathematics", "toán", "toan")
+        val expectedQuestionCount = if (isMath) {
+            when (grade ?: -1) {
+                in 1..5 -> 10
+                in 6..9 -> 16
+                in 10..12 -> 22
+                else -> 3
+            }
+        } else {
+            3
+        }
 
         // =====================================================
         // TITLE
@@ -86,9 +99,9 @@ object AssignmentValidator {
         // QUESTIONS COUNT / IDS
         // =====================================================
 
-        if (questions.size != 3) {
+        if (questions.size != expectedQuestionCount) {
             errors +=
-                "Assignment must contain exactly 3 questions, found ${questions.size}"
+                "Assignment must contain exactly $expectedQuestionCount questions, found ${questions.size}"
         }
 
         val questionIds = questions.map { it.id }
@@ -98,9 +111,10 @@ object AssignmentValidator {
                 "Duplicate question IDs detected: $questionIds"
         }
 
-        if (questionIds != listOf(1, 2, 3)) {
+        val expectedIds = (1..expectedQuestionCount).toList()
+        if (questionIds != expectedIds) {
             errors +=
-                "Question IDs must be exactly [1, 2, 3], found $questionIds"
+                "Question IDs must be exactly $expectedIds, found $questionIds"
         }
 
         // =====================================================
@@ -145,9 +159,9 @@ object AssignmentValidator {
         // ANSWER KEY
         // =====================================================
 
-        if (answerKey.size != 3) {
+        if (answerKey.size != expectedQuestionCount) {
             errors +=
-                "Answer key must contain exactly 3 answers, found ${answerKey.size}"
+                "Answer key must contain exactly $expectedQuestionCount answers, found ${answerKey.size}"
         }
 
         val answerIds = answerKey.map { it.id }
@@ -157,9 +171,9 @@ object AssignmentValidator {
                 "Duplicate answer IDs detected: $answerIds"
         }
 
-        if (answerIds != listOf(1, 2, 3)) {
+        if (answerIds != expectedIds) {
             errors +=
-                "Answer IDs must be exactly [1, 2, 3], found $answerIds"
+                "Answer IDs must be exactly $expectedIds, found $answerIds"
         }
 
         answerKey.forEach { answer ->

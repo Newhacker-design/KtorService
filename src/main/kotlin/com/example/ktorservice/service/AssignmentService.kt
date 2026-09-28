@@ -329,7 +329,9 @@ class AssignmentService(
                         answerKey = candidate.answerKey,
                         gradingGuide = candidate.gradingGuide,
                         totalScore = candidate.totalScore,
-                        learningMaterial = candidate.learningMaterial
+                        learningMaterial = candidate.learningMaterial,
+                        grade = grade,
+                        subject = subject
                     )
 
                 if (!validation.valid) {
