@@ -421,7 +421,7 @@ class AIService {
             question.id <= choiceCount && hasValidAnswerLetter && (
                 question.options.size != 4 ||
                     question.options.any { it.isBlank() } ||
-                    question.options.map(::normalizeSemanticText).distinct().size != 4
+                    question.options.map(::normalizeChoiceOption).distinct().size != 4
                 )
         }
         if (invalidQuestions.isEmpty()) return assignment
@@ -435,7 +435,14 @@ class AIService {
             options == null -> "API không trả về options"
             options.size != 4 -> "có ${options.size} lựa chọn, cần 4"
             options.any { it.isBlank() } -> "có lựa chọn rỗng"
-            options.map(::normalizeSemanticText).distinct().size != 4 -> "có lựa chọn trùng"
+            options.map(::normalizeChoiceOption).distinct().size != 4 -> {
+                val duplicates = options.map(::normalizeChoiceOption)
+                    .groupingBy { it }
+                    .eachCount()
+                    .filterValues { it > 1 }
+                    .keys
+                "có lựa chọn trùng sau chuẩn hóa: ${duplicates.joinToString()}"
+            }
             else -> ""
         }
 
@@ -2587,7 +2594,7 @@ $learningStepContext
             if (question.options.isNotEmpty()) {
                 if (question.options.size != 4 ||
                     question.options.any { it.isBlank() } ||
-                    question.options.map { normalizeSemanticText(it) }.distinct().size != 4
+                    question.options.map { normalizeChoiceOption(it) }.distinct().size != 4
                 ) {
                     errors += "Question ${question.id} must have exactly 4 distinct non-empty choices"
                 }
@@ -2713,6 +2720,18 @@ $learningStepContext
             .replace(Regex("\\s+"), " ")
             .trim()
     }
+
+    /** Preserve mathematical operators so distinct expressions are not collapsed together. */
+    private fun normalizeChoiceOption(text: String): String = text
+        .lowercase(Locale.ROOT)
+        .replace(Regex("^[a-d][.)]\\s*"), "")
+        .replace('×', '*')
+        .replace('·', '*')
+        .replace('÷', '/')
+        .replace('−', '-')
+        .replace('–', '-')
+        .replace(Regex("\\s+"), "")
+        .trimEnd('.', ',', ';', ':')
 
 // ============================================================
 // SEX EDUCATION VALIDATION
