@@ -27,6 +27,9 @@ object ControlWebSocketHub {
     private val json =
         Json {
             ignoreUnknownKeys = true
+            // WebSocket consumers dispatch on `type`. kotlinx.serialization
+            // omits properties with default values unless defaults are encoded.
+            encodeDefaults = true
         }
 
     fun register(
