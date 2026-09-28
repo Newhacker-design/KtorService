@@ -125,7 +125,8 @@ object AssignmentValidator {
 
             validateQuestion(
                 question = question,
-                errors = errors
+                errors = errors,
+                isMath = isMath
             )
         }
 
@@ -295,7 +296,8 @@ object AssignmentValidator {
 
     private fun validateQuestion(
         question: AIService.GeneratedQuestion,
-        errors: MutableList<String>
+        errors: MutableList<String>,
+        isMath: Boolean
     ) {
 
         val id = question.id
@@ -422,18 +424,23 @@ object AssignmentValidator {
             text = text,
             fieldName = "Question $id",
             errors = errors,
-            checkQuestionStructure = true
+            checkQuestionStructure = true,
+            ignoreRepeatedWords = isMath
         )
 
         // -----------------------------------------------------
         // QUESTION MUST LOOK LIKE A QUESTION
         // -----------------------------------------------------
 
-        validateQuestionStructure(
-            id = id,
-            text = text,
-            errors = errors
-        )
+        // A question paired with four choices is structurally an MCQ even if
+        // its wording does not contain one of the natural-language command verbs.
+        if (question.options.size != 4) {
+            validateQuestionStructure(
+                id = id,
+                text = text,
+                errors = errors
+            )
+        }
     }
 
     // =========================================================
@@ -502,7 +509,8 @@ object AssignmentValidator {
         text: String,
         fieldName: String,
         errors: MutableList<String>,
-        checkQuestionStructure: Boolean
+        checkQuestionStructure: Boolean,
+        ignoreRepeatedWords: Boolean = false
     ) {
 
         val normalized = text.trim()
@@ -607,6 +615,7 @@ object AssignmentValidator {
         for (i in 0 until words.size - 1) {
 
             if (
+                !ignoreRepeatedWords &&
                 words[i].length >= 3 &&
                 words[i] == words[i + 1]
             ) {
