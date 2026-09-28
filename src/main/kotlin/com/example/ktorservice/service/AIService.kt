@@ -372,7 +372,18 @@ class AIService {
             )
         }
 
-        val assignment = parseResponse(response)
+        val parsedAssignment = parseResponse(response)
+        val assignment = if (
+            !sexEducation && isMathSubject(subject) && grade in 1..12
+        ) {
+            repairInvalidMathChoices(
+                assignment = parsedAssignment,
+                grade = grade,
+                subject = subject
+            )
+        } else {
+            parsedAssignment
+        }
 
         if (sexEducation) {
             validateSexEducationAssignment(
@@ -390,6 +401,97 @@ class AIService {
 
         return assignment
     }
+
+    /** Repairs only malformed MCQ option arrays before rejecting the full assignment. */
+    private suspend fun repairInvalidMathChoices(
+        assignment: GeneratedAssignment,
+        grade: Int,
+        subject: String
+    ): GeneratedAssignment {
+        val choiceCount = when (grade) {
+            in 1..5 -> 10
+            in 6..9 -> 11
+            else -> 12
+        }
+        val answersById = assignment.answerKey.associateBy { it.id }
+        val invalidQuestions = assignment.questions.filter { question ->
+            val hasValidAnswerLetter =
+                answersById[question.id]?.answer?.trim()?.uppercase(Locale.ROOT) in
+                    setOf("A", "B", "C", "D")
+            question.id <= choiceCount && hasValidAnswerLetter && (
+                question.options.size != 4 ||
+                    question.options.any { it.isBlank() } ||
+                    question.options.map(::normalizeSemanticText).distinct().size != 4
+                )
+        }
+        if (invalidQuestions.isEmpty()) return assignment
+
+        val questionsToRepair = buildJsonArray {
+            invalidQuestions.forEach { question ->
+                add(buildJsonObject {
+                    put("id", question.id)
+                    put("question", question.question)
+                    put("correctOption", answersById[question.id]?.answer.orEmpty())
+                    put("existingOptions", buildJsonArray {
+                        question.options.forEach { option -> add(JsonPrimitive(option)) }
+                    })
+                })
+            }
+        }
+        val prompt = """
+            Bạn là biên tập viên đề Toán lớp $grade, môn $subject.
+            Hãy sửa danh sách lựa chọn cho các câu trắc nghiệm sau.
+            Với MỖI câu, trả đúng 4 phương án A, B, C, D có nội dung khác nhau,
+            không để trống, không lặp ý, không thêm tiền tố A./B./C./D. vào nội dung.
+            Phương án có vị trí bằng correctOption phải là đáp án đúng; giữ đáp án đó
+            nếu nó đã có trong existingOptions, nếu chưa có thì tự giải câu hỏi để tạo.
+            Các phương án sai cần hợp lý nhưng không được cùng giá trị với đáp án đúng.
+            Chỉ trả JSON đúng schema:
+            {"questions":[{"id":1,"options":["...","...","...","..."]}]}
+            Không thêm lời dẫn hoặc markdown.
+
+            Câu cần sửa:
+            $questionsToRepair
+        """.trimIndent()
+
+        val response = callGeminiWithRetry(
+            prompt = prompt,
+            sexEducation = false,
+            temperature = 0.2
+        )
+        val repairedRoot = parseGeminiJsonResponse(response).jsonObject
+        val repairedOptions = repairedRoot["questions"]?.jsonArray
+            ?.associate { element ->
+                val item = element.jsonObject
+                val id = item["id"]?.jsonPrimitive?.intOrNull
+                    ?: throw IllegalStateException("Choice repair response is missing a question id")
+                val options = item["options"]?.jsonArray
+                    ?.map { it.jsonPrimitive.content.trim() }
+                    ?: throw IllegalStateException("Choice repair response for question $id is missing options")
+                id to options
+            }
+            ?: throw IllegalStateException("Choice repair response is missing questions")
+
+        val expectedIds = invalidQuestions.map { it.id }.toSet()
+        if (repairedOptions.keys != expectedIds) {
+            throw IllegalStateException("Choice repair response returned unexpected question IDs")
+        }
+
+        val updated = assignment.copy(questions = assignment.questions.map { question ->
+            val options = repairedOptions[question.id] ?: return@map question
+            if (options.size != 4 || options.any { it.isBlank() } ||
+                options.map(::normalizeSemanticText).distinct().size != 4
+            ) {
+                throw IllegalStateException("Choice repair did not produce four distinct options for question ${question.id}")
+            }
+            question.copy(options = options)
+        })
+        println("[AIService] Repaired multiple-choice options for question IDs ${expectedIds.sorted()}")
+        return updated
+    }
+
+    private fun isMathSubject(subject: String): Boolean =
+        subject.contains("toán", ignoreCase = true) || subject.contains("math", ignoreCase = true)
 
 // ============================================================
 // BLUEPRINT
