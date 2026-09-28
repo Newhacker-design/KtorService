@@ -85,8 +85,34 @@ class AIService {
     enum class RuleGradingMethod {
         EXACT,
         NUMERIC,
-        REQUIRED_CONCEPTS
+        REQUIRED_CONCEPTS,
+        STEP_RUBRIC
     }
+
+    @Serializable
+    enum class RubricCriterionMethod {
+        EVIDENCE,
+        REQUIRED_CONCEPTS,
+        FINAL_NUMERIC
+    }
+
+    @Serializable
+    data class RubricCriterion(
+        val id: String,
+        val description: String,
+        val points: Double,
+        val method: RubricCriterionMethod,
+        val acceptedEvidence: List<String> = emptyList(),
+        val requiredConcepts: List<String> = emptyList(),
+        val expectedNumber: String? = null,
+        val numericTolerance: Double = 0.0
+    )
+
+    @Serializable
+    data class GradingRubric(
+        val version: Int = 1,
+        val criteria: List<RubricCriterion> = emptyList()
+    )
 
     @Serializable
     data class GradingSpec(
@@ -98,7 +124,8 @@ class AIService {
         val ignoreWhitespace: Boolean = true,
         val ignorePunctuation: Boolean = false,
         val numericTolerance: Double = 0.0,
-        val allowPartialCredit: Boolean = false
+        val allowPartialCredit: Boolean = false,
+        val rubric: GradingRubric? = null
     )
 
     enum class SubjectType {
@@ -809,10 +836,12 @@ class AIService {
         - Không markdown ngoài JSON.
 
         === GRADINGSPEC CHO RULE ENGINE LOCAL ===
-        Mỗi câu phải có gradingSpec với method là EXACT, NUMERIC hoặc REQUIRED_CONCEPTS.
+        Mỗi câu phải có gradingSpec với method là EXACT, NUMERIC, REQUIRED_CONCEPTS hoặc STEP_RUBRIC.
         - EXACT: dùng cho đáp án ngắn; đưa các biến thể đúng vào acceptedAnswers.
         - NUMERIC: chỉ dùng khi đáp án là một số thuần trong answerKey.
         - REQUIRED_CONCEPTS: dùng cho câu trả lời ngắn có 2-5 ý bắt buộc kiểm tra được.
+        - STEP_RUBRIC: chỉ dùng cho bài Toán nhiều bước; rubric.version hiện là 1, criteria phải có id, description, points, method và bằng chứng chấm được. Các method tiêu chí: EVIDENCE (acceptedEvidence), REQUIRED_CONCEPTS (requiredConcepts), FINAL_NUMERIC (expectedNumber, numericTolerance). Tổng points của criteria phải bằng điểm câu.
+          Cấu trúc: "rubric":{"version":1,"criteria":[{"id":"method","description":"...","points":1,"method":"REQUIRED_CONCEPTS","requiredConcepts":["..."]},{"id":"work","description":"...","points":1,"method":"EVIDENCE","acceptedEvidence":["..."]},{"id":"final","description":"...","points":1,"method":"FINAL_NUMERIC","expectedNumber":"...","numericTolerance":0}]}. Chỉ sinh tiêu chí có thể nhận diện trong câu trả lời.
         Không dùng gradingSpec cho bài luận mở hoặc ý kiến chủ quan. acceptedAnswers chỉ chứa biến thể đúng.
 
         $previousText
@@ -1066,10 +1095,12 @@ $learningStepContext
         - Ưu tiên SELF_CONTAINED nếu câu hỏi đã đủ dữ kiện.
 
         === GRADINGSPEC CHO RULE ENGINE LOCAL ===
-        Mỗi câu phải có gradingSpec với method là EXACT, NUMERIC hoặc REQUIRED_CONCEPTS.
+        Mỗi câu phải có gradingSpec với method là EXACT, NUMERIC, REQUIRED_CONCEPTS hoặc STEP_RUBRIC.
         - EXACT: dùng cho đáp án ngắn; đưa các biến thể đúng vào acceptedAnswers.
         - NUMERIC: chỉ dùng khi answerKey.answer là một số thuần.
         - REQUIRED_CONCEPTS: dùng cho câu trả lời ngắn có 2-5 ý bắt buộc kiểm tra được.
+        - STEP_RUBRIC: chỉ dùng cho bài Toán nhiều bước; rubric.version hiện là 1, criteria phải có id, description, points, method và bằng chứng chấm được. Các method tiêu chí: EVIDENCE (acceptedEvidence), REQUIRED_CONCEPTS (requiredConcepts), FINAL_NUMERIC (expectedNumber, numericTolerance). Tổng points của criteria phải bằng điểm câu.
+          Cấu trúc: "rubric":{"version":1,"criteria":[{"id":"method","description":"...","points":1,"method":"REQUIRED_CONCEPTS","requiredConcepts":["..."]},{"id":"work","description":"...","points":1,"method":"EVIDENCE","acceptedEvidence":["..."]},{"id":"final","description":"...","points":1,"method":"FINAL_NUMERIC","expectedNumber":"...","numericTolerance":0}]}. Chỉ sinh tiêu chí có thể nhận diện trong câu trả lời.
         Không dùng gradingSpec cho bài luận mở hoặc ý kiến chủ quan. acceptedAnswers chỉ chứa biến thể đúng.
 
         $previousText
@@ -1944,6 +1975,8 @@ $learningStepContext
     ) {
 
         val errors = mutableListOf<String>()
+        val isMathSubject = subject.contains("toán", ignoreCase = true) ||
+                subject.contains("math", ignoreCase = true)
 
         if (assignment.title.isBlank()) {
             errors += "Assignment title is empty"
@@ -2056,6 +2089,55 @@ $learningStepContext
                 spec.correctAnswer.replace(',', '.').toDoubleOrNull() == null
             ) {
                 errors += "Question ${question.id} has a non-numeric answer for NUMERIC grading"
+            }
+            if (spec.method == RuleGradingMethod.STEP_RUBRIC) {
+                if (!isMathSubject) {
+                    errors += "Question ${question.id} uses STEP_RUBRIC outside a math subject"
+                }
+                val rubric = spec.rubric
+                if (rubric == null) {
+                    errors += "Question ${question.id} uses STEP_RUBRIC without a rubric"
+                } else {
+                    if (rubric.version != 1) {
+                        errors += "Question ${question.id} uses unsupported rubric version ${rubric.version}"
+                    }
+                    if (rubric.criteria.isEmpty()) {
+                        errors += "Question ${question.id} has an empty rubric"
+                    }
+                    val criterionIds = rubric.criteria.map { it.id.trim() }
+                    if (criterionIds.any { it.isBlank() } || criterionIds.distinct().size != criterionIds.size) {
+                        errors += "Question ${question.id} has blank or duplicate rubric criterion IDs"
+                    }
+                    val rubricPoints = rubric.criteria.sumOf { it.points }
+                    if (rubric.criteria.any { !it.points.isFinite() || it.points <= 0.0 } ||
+                        kotlin.math.abs(rubricPoints - question.points) > 0.01
+                    ) {
+                        errors += "Question ${question.id} rubric points must be positive and sum to question points"
+                    }
+                    rubric.criteria.forEach { criterion ->
+                        if (criterion.description.isBlank()) {
+                            errors += "Question ${question.id} rubric criterion ${criterion.id} has no description"
+                        }
+                        when (criterion.method) {
+                            RubricCriterionMethod.EVIDENCE -> if (criterion.acceptedEvidence.isEmpty()) {
+                                errors += "Question ${question.id} rubric criterion ${criterion.id} has no acceptedEvidence"
+                            }
+                            RubricCriterionMethod.REQUIRED_CONCEPTS -> if (criterion.requiredConcepts.isEmpty()) {
+                                errors += "Question ${question.id} rubric criterion ${criterion.id} has no requiredConcepts"
+                            }
+                            RubricCriterionMethod.FINAL_NUMERIC -> {
+                                val expected = criterion.expectedNumber?.replace(',', '.')?.toDoubleOrNull()
+                                if (expected == null || !expected.isFinite() ||
+                                    !criterion.numericTolerance.isFinite() || criterion.numericTolerance < 0.0
+                                ) {
+                                    errors += "Question ${question.id} rubric criterion ${criterion.id} has invalid numeric settings"
+                                }
+                            }
+                        }
+                    }
+                }
+            } else if (spec.rubric != null) {
+                errors += "Question ${question.id} has a rubric but does not use STEP_RUBRIC"
             }
 
             if (question.question.isBlank()) {
