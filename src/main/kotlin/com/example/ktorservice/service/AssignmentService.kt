@@ -500,6 +500,9 @@ class AssignmentService(
         // Tạo QuestionMetadata
         // ========================================================
 
+        val generatedAnswersById =
+            finalGenerated.answerKey.associateBy { it.id }
+
         val questionMetadata =
             json.encodeToString(
                 finalGenerated.questions.map { question ->
@@ -511,7 +514,13 @@ class AssignmentService(
                         points = question.points,
                         answerType = question.answerType,
                         gradingMethod = question.gradingMethod,
-                        sourceType = question.sourceType
+                        sourceType = question.sourceType,
+                        gradingSpec = question.gradingSpec.copy(
+                            correctAnswer = generatedAnswersById[question.id]?.answer
+                                ?: throw IllegalStateException(
+                                    "Missing answer key for question ${question.id}"
+                                )
+                        )
                     )
                 }
             )
@@ -605,7 +614,13 @@ class AssignmentService(
                                     points = question.points,
                                     answerType = question.answerType,
                                     gradingMethod = question.gradingMethod,
-                                    sourceType = question.sourceType
+                                    sourceType = question.sourceType,
+                                    gradingSpec = question.gradingSpec.copy(
+                                        correctAnswer = generatedAnswersById[question.id]?.answer
+                                            ?: throw IllegalStateException(
+                                                "Missing answer key for question ${question.id}"
+                                            )
+                                    )
                                 )
                             }
                     )
@@ -1001,7 +1016,10 @@ class AssignmentService(
     suspend fun submitAssignment(
         userId: Int,
         userAssignmentId: Int,
-        answer: String
+        answer: String,
+        localScore: Double? = null,
+        localFeedback: String? = null,
+        localGradingDetails: String? = null
     ): UserAssignmentResult? {
 
         if (answer.isBlank()) {
@@ -1037,18 +1055,63 @@ class AssignmentService(
             "ASSIGNMENT ID = ${userAssignment.assignmentId}"
         )
 
-        // ========================================================
-        // Chuẩn bị GeneratedAssignment cho AIService v2
-        // ========================================================
+        val grading = if (localScore != null) {
+            val feedback = localFeedback?.takeIf { it.isNotBlank() }
+                ?: throw IllegalArgumentException("Local grading feedback is required")
+            val detailsJson = localGradingDetails?.takeIf { it.isNotBlank() }
+                ?: throw IllegalArgumentException("Local grading details are required")
+            require(localScore.isFinite()) { "Local score must be finite" }
+            require(localScore in 0.0..userAssignment.assignment.totalScore) {
+                "Local score is outside the assignment score range"
+            }
+            require(userAssignment.assignment.questionMetadata.isNotEmpty()) {
+                "This assignment has no question metadata"
+            }
+            require(userAssignment.assignment.questionMetadata.all {
+                !it.gradingSpec?.correctAnswer.isNullOrBlank()
+            }) {
+                "This assignment does not contain a complete local grading specification"
+            }
 
-        val assignmentForGrading =
-            buildGeneratedAssignmentForGrading(
+            val details = json.decodeFromString<List<AIService.QuestionGradingResult>>(
+                detailsJson
+            )
+            val questionsById = userAssignment.assignment.questionMetadata.associateBy { it.id }
+            val expectedIds = questionsById.keys
+            require(details.size == expectedIds.size && details.map { it.id }.toSet() == expectedIds) {
+                "Local grading details must contain exactly one result per question"
+            }
+            details.forEach { detail ->
+                val question = questionsById[detail.id]
+                    ?: throw IllegalArgumentException("Unknown question id ${detail.id}")
+                require(detail.score.isFinite() && detail.score in 0.0..question.points) {
+                    "Invalid local score for question ${detail.id}"
+                }
+            }
+            val detailsTotal = details.sumOf { it.score }
+            require(kotlin.math.abs(detailsTotal - localScore) <= 0.001) {
+                "Local score must equal the sum of question scores"
+            }
+
+            AIService.GradingResult(
+                score = localScore,
+                feedback = feedback,
+                questions = details
+            )
+        } else {
+            val assignmentForGrading = buildGeneratedAssignmentForGrading(
                 assignment = userAssignment.assignment
             )
+            aiSemaphore.withPermit {
+                aiService.gradeAssignment(
+                    assignment = assignmentForGrading,
+                    studentAnswer = answer,
+                    subject = userAssignment.assignment.subject
+                )
+            }
+        }
 
-        println(
-            "========== ASSIGNMENT DATA FOR GRADING =========="
-        )
+        println("========== ASSIGNMENT SUBMISSION ==========")
 
         println(
             "ASSIGNMENT ID = ${userAssignment.assignment.id}"
@@ -1107,37 +1170,7 @@ class AssignmentService(
         // ========================================================
 
         println(
-            "GRADING ASSIGNMENT WITH AI..."
-        )
-
-        println(
-            "WAITING FOR AI GRADING SLOT..."
-        )
-
-        val grading =
-            aiSemaphore.withPermit {
-
-                println(
-                    "AI GRADING SLOT ACQUIRED"
-                )
-
-                try {
-                    aiService.gradeAssignment(
-                        assignment = assignmentForGrading,
-                        studentAnswer = answer,
-                        subject = userAssignment.assignment.subject
-                    )
-
-                } finally {
-
-                    println(
-                        "AI GRADING SLOT RELEASED"
-                    )
-                }
-            }
-
-        println(
-            "AI GRADE = ${grading.score}"
+            "SUBMISSION GRADE = ${grading.score}"
         )
         val gradingDetailsJson =
             json.encodeToString(
@@ -1282,7 +1315,8 @@ class AssignmentService(
                     points = metadata.points,
                     answerType = metadata.answerType,
                     gradingMethod = metadata.gradingMethod,
-                    sourceType = metadata.sourceType
+                    sourceType = metadata.sourceType,
+                    gradingSpec = metadata.gradingSpec ?: AIService.GradingSpec()
                 )
             }
 

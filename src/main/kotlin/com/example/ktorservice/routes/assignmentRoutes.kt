@@ -506,7 +506,10 @@ fun Route.assignmentRoutes(
                                             metadata.answerType,
 
                                         gradingMethod =
-                                            metadata.gradingMethod
+                                            metadata.gradingMethod,
+
+                                        gradingSpec =
+                                            metadata.gradingSpec
                                     )
                                 },
 
@@ -769,7 +772,10 @@ fun Route.assignmentRoutes(
                                             metadata.answerType,
 
                                         gradingMethod =
-                                            metadata.gradingMethod
+                                            metadata.gradingMethod,
+
+                                        gradingSpec =
+                                            metadata.gradingSpec
                                     )
                                 },
 
@@ -1144,7 +1150,10 @@ fun Route.assignmentRoutes(
                                                 metadata.answerType,
 
                                             gradingMethod =
-                                                metadata.gradingMethod
+                                                metadata.gradingMethod,
+
+                                            gradingSpec =
+                                                metadata.gradingSpec
                                         )
                                     },
 
@@ -1369,7 +1378,10 @@ fun Route.assignmentRoutes(
                 assignmentService.submitAssignment(
                     userId = userId,
                     userAssignmentId = id,
-                    answer = request.answer
+                    answer = request.answer,
+                    localScore = request.localScore,
+                    localFeedback = request.localFeedback,
+                    localGradingDetails = request.localGradingDetails
                 )
 
             if (result == null) {

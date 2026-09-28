@@ -81,6 +81,26 @@ class AIService {
         OPENCV_VISION_AI
     }
 
+    @Serializable
+    enum class RuleGradingMethod {
+        EXACT,
+        NUMERIC,
+        REQUIRED_CONCEPTS
+    }
+
+    @Serializable
+    data class GradingSpec(
+        val method: RuleGradingMethod = RuleGradingMethod.EXACT,
+        val correctAnswer: String = "",
+        val acceptedAnswers: List<String> = emptyList(),
+        val requiredConcepts: List<String> = emptyList(),
+        val caseSensitive: Boolean = false,
+        val ignoreWhitespace: Boolean = true,
+        val ignorePunctuation: Boolean = false,
+        val numericTolerance: Double = 0.0,
+        val allowPartialCredit: Boolean = false
+    )
+
     enum class SubjectType {
         NORMAL,
         SEX_EDUCATION
@@ -95,7 +115,8 @@ class AIService {
         val answerType: AnswerType,
         val gradingMethod: GradingMethod,
         val sourceType: QuestionSourceType =
-            QuestionSourceType.SELF_CONTAINED
+            QuestionSourceType.SELF_CONTAINED,
+        val gradingSpec: GradingSpec = GradingSpec()
     )
 
     @Serializable
@@ -787,6 +808,13 @@ class AIService {
         - JSON hợp lệ.
         - Không markdown ngoài JSON.
 
+        === GRADINGSPEC CHO RULE ENGINE LOCAL ===
+        Mỗi câu phải có gradingSpec với method là EXACT, NUMERIC hoặc REQUIRED_CONCEPTS.
+        - EXACT: dùng cho đáp án ngắn; đưa các biến thể đúng vào acceptedAnswers.
+        - NUMERIC: chỉ dùng khi đáp án là một số thuần trong answerKey.
+        - REQUIRED_CONCEPTS: dùng cho câu trả lời ngắn có 2-5 ý bắt buộc kiểm tra được.
+        Không dùng gradingSpec cho bài luận mở hoặc ý kiến chủ quan. acceptedAnswers chỉ chứa biến thể đúng.
+
         $previousText
 
         $qualityText
@@ -805,7 +833,17 @@ class AIService {
               "points": 3,
               "answerType": "TEXT",
               "gradingMethod": "AI_TEXT",
-              "sourceType": "SELF_CONTAINED"
+              "sourceType": "SELF_CONTAINED",
+              "gradingSpec": {
+                "method": "EXACT",
+                "acceptedAnswers": ["..."],
+                "requiredConcepts": [],
+                "caseSensitive": false,
+                "ignoreWhitespace": true,
+                "ignorePunctuation": false,
+                "numericTolerance": 0,
+                "allowPartialCredit": false
+              }
             },
             {
               "id": 2,
@@ -814,7 +852,17 @@ class AIService {
               "points": 3,
               "answerType": "HANDWRITING",
               "gradingMethod": "OCR_AI",
-              "sourceType": "SELF_CONTAINED"
+              "sourceType": "SELF_CONTAINED",
+              "gradingSpec": {
+                "method": "NUMERIC",
+                "acceptedAnswers": [],
+                "requiredConcepts": [],
+                "caseSensitive": false,
+                "ignoreWhitespace": true,
+                "ignorePunctuation": false,
+                "numericTolerance": 0,
+                "allowPartialCredit": false
+              }
             },
             {
               "id": 3,
@@ -823,7 +871,17 @@ class AIService {
               "points": 4,
               "answerType": "HANDWRITING",
               "gradingMethod": "OCR_AI",
-              "sourceType": "SELF_CONTAINED"
+              "sourceType": "SELF_CONTAINED",
+              "gradingSpec": {
+                "method": "REQUIRED_CONCEPTS",
+                "acceptedAnswers": [],
+                "requiredConcepts": ["...", "..."],
+                "caseSensitive": false,
+                "ignoreWhitespace": false,
+                "ignorePunctuation": true,
+                "numericTolerance": 0,
+                "allowPartialCredit": true
+              }
             }
           ],
           "answerKey": [
@@ -1007,6 +1065,13 @@ $learningStepContext
         - Không tạo learningMaterial chỉ để đối phó validator.
         - Ưu tiên SELF_CONTAINED nếu câu hỏi đã đủ dữ kiện.
 
+        === GRADINGSPEC CHO RULE ENGINE LOCAL ===
+        Mỗi câu phải có gradingSpec với method là EXACT, NUMERIC hoặc REQUIRED_CONCEPTS.
+        - EXACT: dùng cho đáp án ngắn; đưa các biến thể đúng vào acceptedAnswers.
+        - NUMERIC: chỉ dùng khi answerKey.answer là một số thuần.
+        - REQUIRED_CONCEPTS: dùng cho câu trả lời ngắn có 2-5 ý bắt buộc kiểm tra được.
+        Không dùng gradingSpec cho bài luận mở hoặc ý kiến chủ quan. acceptedAnswers chỉ chứa biến thể đúng.
+
         $previousText
 
         $qualityText
@@ -1025,7 +1090,17 @@ $learningStepContext
               "points": 3,
               "answerType": "TEXT",
               "gradingMethod": "AI_TEXT",
-              "sourceType": "SELF_CONTAINED"
+              "sourceType": "SELF_CONTAINED",
+              "gradingSpec": {
+                "method": "REQUIRED_CONCEPTS",
+                "acceptedAnswers": [],
+                "requiredConcepts": ["...", "..."],
+                "caseSensitive": false,
+                "ignoreWhitespace": false,
+                "ignorePunctuation": true,
+                "numericTolerance": 0,
+                "allowPartialCredit": true
+              }
             },
             {
               "id": 2,
@@ -1034,7 +1109,17 @@ $learningStepContext
               "points": 3,
               "answerType": "TEXT",
               "gradingMethod": "AI_TEXT",
-              "sourceType": "SELF_CONTAINED"
+              "sourceType": "SELF_CONTAINED",
+              "gradingSpec": {
+                "method": "EXACT",
+                "acceptedAnswers": ["..."],
+                "requiredConcepts": [],
+                "caseSensitive": false,
+                "ignoreWhitespace": true,
+                "ignorePunctuation": false,
+                "numericTolerance": 0,
+                "allowPartialCredit": false
+              }
             },
             {
               "id": 3,
@@ -1043,7 +1128,17 @@ $learningStepContext
               "points": 4,
               "answerType": "TEXT",
               "gradingMethod": "AI_TEXT",
-              "sourceType": "SELF_CONTAINED"
+              "sourceType": "SELF_CONTAINED",
+              "gradingSpec": {
+                "method": "REQUIRED_CONCEPTS",
+                "acceptedAnswers": [],
+                "requiredConcepts": ["...", "..."],
+                "caseSensitive": false,
+                "ignoreWhitespace": false,
+                "ignorePunctuation": true,
+                "numericTolerance": 0,
+                "allowPartialCredit": true
+              }
             }
           ],
           "answerKey": [
@@ -1672,6 +1767,22 @@ $learningStepContext
                     )
                 }
 
+                val gradingSpecElement =
+                    q["gradingSpec"]
+                        ?: throw IllegalStateException(
+                            "Question $id missing gradingSpec"
+                        )
+
+                val gradingSpec = try {
+                    json.decodeFromJsonElement<GradingSpec>(
+                        gradingSpecElement
+                    )
+                } catch (e: Exception) {
+                    throw IllegalStateException(
+                        "Question $id has invalid gradingSpec: ${e.message}"
+                    )
+                }
+
                 validateGradingCompatibility(
                     answerType = answerType,
                     gradingMethod = gradingMethod
@@ -1684,7 +1795,8 @@ $learningStepContext
                     points = points,
                     answerType = answerType,
                     gradingMethod = gradingMethod,
-                    sourceType = sourceType
+                    sourceType = sourceType,
+                    gradingSpec = gradingSpec
                 )
             }
 
@@ -1736,10 +1848,23 @@ $learningStepContext
                 "Gemini response missing totalScore"
             )
 
+        val answersById = answerKey.associateBy { it.id }
+        val questionsWithAnswers = questions.map { question ->
+            val correctAnswer = answersById[question.id]?.answer
+                ?: throw IllegalStateException(
+                    "Missing answer key for question ${question.id}"
+                )
+            question.copy(
+                gradingSpec = question.gradingSpec.copy(
+                    correctAnswer = correctAnswer
+                )
+            )
+        }
+
         return GeneratedAssignment(
             title = title,
             learningMaterial = learningMaterial,
-            questions = questions,
+            questions = questionsWithAnswers,
             answerKey = answerKey,
             gradingGuide = gradingGuide,
             totalScore = totalScore
@@ -1912,6 +2037,26 @@ $learningStepContext
             mutableSetOf<String>()
 
         assignment.questions.forEach { question ->
+
+            val spec = question.gradingSpec
+            if (spec.correctAnswer.isBlank()) {
+                errors += "Question ${question.id} has no gradingSpec correctAnswer"
+            }
+            if (!spec.numericTolerance.isFinite() || spec.numericTolerance < 0.0) {
+                errors += "Question ${question.id} has invalid numericTolerance"
+            }
+            if (
+                spec.method == RuleGradingMethod.REQUIRED_CONCEPTS &&
+                spec.requiredConcepts.isEmpty()
+            ) {
+                errors += "Question ${question.id} requires at least one grading concept"
+            }
+            if (
+                spec.method == RuleGradingMethod.NUMERIC &&
+                spec.correctAnswer.replace(',', '.').toDoubleOrNull() == null
+            ) {
+                errors += "Question ${question.id} has a non-numeric answer for NUMERIC grading"
+            }
 
             if (question.question.isBlank()) {
                 errors +=

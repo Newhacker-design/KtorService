@@ -11,7 +11,8 @@ data class QuestionMetadata(
     val answerType: AIService.AnswerType,
     val gradingMethod: AIService.GradingMethod,
     val sourceType: AIService.QuestionSourceType =
-        AIService.QuestionSourceType.SELF_CONTAINED
+        AIService.QuestionSourceType.SELF_CONTAINED,
+    val gradingSpec: AIService.GradingSpec? = null
 )
 @Serializable
 data class AssignmentGenerateResponse(
@@ -101,7 +102,10 @@ data class AssignmentListResponse(
 )
 @Serializable
 data class AssignmentSubmitRequest(
-    val answer: String
+    val answer: String,
+    val localScore: Double? = null,
+    val localFeedback: String? = null,
+    val localGradingDetails: String? = null
 )
 
 @Serializable
@@ -113,7 +117,8 @@ data class AssignmentQuestion(
     val answerType: AIService.AnswerType,
     val gradingMethod: AIService.GradingMethod,
     val sourceType: AIService.QuestionSourceType =
-        AIService.QuestionSourceType.SELF_CONTAINED
+        AIService.QuestionSourceType.SELF_CONTAINED,
+    val gradingSpec: AIService.GradingSpec? = null
 )
 
 @Serializable
