@@ -97,6 +97,28 @@ class AIService {
     }
 
     @Serializable
+    enum class MathAnswerKind {
+        AUTO,
+        NUMBER,
+        CALCULATION,
+        FILL_BLANK,
+        MULTIPLE_CHOICE,
+        ORDERED_TUPLE,
+        UNORDERED_SET,
+        QUANTITY,
+        SYMBOLIC_EXPRESSION
+    }
+
+    @Serializable
+    data class MathAnswerSpec(
+        val kind: MathAnswerKind = MathAnswerKind.AUTO,
+        val expectedUnit: String? = null,
+        val absoluteTolerance: Double = 0.0,
+        val relativeTolerance: Double = 0.0,
+        val requireEquationConsistency: Boolean = true
+    )
+
+    @Serializable
     data class RubricCriterion(
         val id: String,
         val description: String,
@@ -125,7 +147,8 @@ class AIService {
         val ignorePunctuation: Boolean = false,
         val numericTolerance: Double = 0.0,
         val allowPartialCredit: Boolean = false,
-        val rubric: GradingRubric? = null
+        val rubric: GradingRubric? = null,
+        val mathAnswerSpec: MathAnswerSpec? = null
     )
 
     enum class SubjectType {
@@ -838,10 +861,11 @@ class AIService {
         === GRADINGSPEC CHO RULE ENGINE LOCAL ===
         Mỗi câu phải có gradingSpec với method là EXACT, NUMERIC, REQUIRED_CONCEPTS hoặc STEP_RUBRIC.
         - EXACT: dùng cho đáp án ngắn; đưa các biến thể đúng vào acceptedAnswers.
-        - NUMERIC: chỉ dùng khi đáp án là một số thuần trong answerKey.
+        - NUMERIC: chỉ dùng khi đáp án trong answerKey là số hoặc phân số thuần, không kèm lời giải.
         - REQUIRED_CONCEPTS: dùng cho câu trả lời ngắn có 2-5 ý bắt buộc kiểm tra được.
         - STEP_RUBRIC: chỉ dùng cho bài Toán nhiều bước; rubric.version hiện là 1, criteria phải có id, description, points, method và bằng chứng chấm được. Các method tiêu chí: EVIDENCE (acceptedEvidence), REQUIRED_CONCEPTS (requiredConcepts), FINAL_NUMERIC (expectedNumber, numericTolerance). Tổng points của criteria phải bằng điểm câu.
           Cấu trúc: "rubric":{"version":1,"criteria":[{"id":"method","description":"...","points":1,"method":"REQUIRED_CONCEPTS","requiredConcepts":["..."]},{"id":"work","description":"...","points":1,"method":"EVIDENCE","acceptedEvidence":["..."]},{"id":"final","description":"...","points":1,"method":"FINAL_NUMERIC","expectedNumber":"...","numericTolerance":0}]}. Chỉ sinh tiêu chí có thể nhận diện trong câu trả lời.
+        Nếu môn học là Toán, mọi câu phải có gradingSpec.mathAnswerSpec với kind cụ thể: NUMBER, CALCULATION, FILL_BLANK, MULTIPLE_CHOICE, ORDERED_TUPLE, UNORDERED_SET, QUANTITY hoặc SYMBOLIC_EXPRESSION; không dùng AUTO. FILL_BLANK dùng 1-8 chỗ ___, ..., □ hoặc [ ], correctAnswer chỉ ghi giá trị cần điền (nhiều giá trị theo thứ tự, phân cách bằng dấu chấm phẩy). QUANTITY phải có expectedUnit. Với biểu thức ký hiệu chỉ chấp nhận acceptedAnswers được liệt kê tường minh; không giả định tương đương đại số.
         Không dùng gradingSpec cho bài luận mở hoặc ý kiến chủ quan. acceptedAnswers chỉ chứa biến thể đúng.
 
         $previousText
@@ -1097,10 +1121,11 @@ $learningStepContext
         === GRADINGSPEC CHO RULE ENGINE LOCAL ===
         Mỗi câu phải có gradingSpec với method là EXACT, NUMERIC, REQUIRED_CONCEPTS hoặc STEP_RUBRIC.
         - EXACT: dùng cho đáp án ngắn; đưa các biến thể đúng vào acceptedAnswers.
-        - NUMERIC: chỉ dùng khi answerKey.answer là một số thuần.
+        - NUMERIC: chỉ dùng khi answerKey.answer là số hoặc phân số thuần, không kèm lời giải.
         - REQUIRED_CONCEPTS: dùng cho câu trả lời ngắn có 2-5 ý bắt buộc kiểm tra được.
         - STEP_RUBRIC: chỉ dùng cho bài Toán nhiều bước; rubric.version hiện là 1, criteria phải có id, description, points, method và bằng chứng chấm được. Các method tiêu chí: EVIDENCE (acceptedEvidence), REQUIRED_CONCEPTS (requiredConcepts), FINAL_NUMERIC (expectedNumber, numericTolerance). Tổng points của criteria phải bằng điểm câu.
           Cấu trúc: "rubric":{"version":1,"criteria":[{"id":"method","description":"...","points":1,"method":"REQUIRED_CONCEPTS","requiredConcepts":["..."]},{"id":"work","description":"...","points":1,"method":"EVIDENCE","acceptedEvidence":["..."]},{"id":"final","description":"...","points":1,"method":"FINAL_NUMERIC","expectedNumber":"...","numericTolerance":0}]}. Chỉ sinh tiêu chí có thể nhận diện trong câu trả lời.
+        Nếu môn học là Toán, mọi câu phải có gradingSpec.mathAnswerSpec với kind cụ thể: NUMBER, CALCULATION, FILL_BLANK, MULTIPLE_CHOICE, ORDERED_TUPLE, UNORDERED_SET, QUANTITY hoặc SYMBOLIC_EXPRESSION; không dùng AUTO. FILL_BLANK dùng 1-8 chỗ ___, ..., □ hoặc [ ], correctAnswer chỉ ghi giá trị cần điền (nhiều giá trị theo thứ tự, phân cách bằng dấu chấm phẩy). QUANTITY phải có expectedUnit. Với biểu thức ký hiệu chỉ chấp nhận acceptedAnswers được liệt kê tường minh; không giả định tương đương đại số.
         Không dùng gradingSpec cho bài luận mở hoặc ý kiến chủ quan. acceptedAnswers chỉ chứa biến thể đúng.
 
         $previousText
@@ -2086,7 +2111,7 @@ $learningStepContext
             }
             if (
                 spec.method == RuleGradingMethod.NUMERIC &&
-                spec.correctAnswer.replace(',', '.').toDoubleOrNull() == null
+                !isNumericAnswer(spec.correctAnswer)
             ) {
                 errors += "Question ${question.id} has a non-numeric answer for NUMERIC grading"
             }
@@ -2138,6 +2163,33 @@ $learningStepContext
                 }
             } else if (spec.rubric != null) {
                 errors += "Question ${question.id} has a rubric but does not use STEP_RUBRIC"
+            }
+            if (isMathSubject) {
+                val mathSpec = spec.mathAnswerSpec
+                if (mathSpec == null) {
+                    errors += "Math question ${question.id} has no mathAnswerSpec"
+                } else {
+                    if (mathSpec.kind == MathAnswerKind.AUTO) {
+                        errors += "Math question ${question.id} must use an explicit math answer kind"
+                    }
+                    if (!mathSpec.absoluteTolerance.isFinite() || mathSpec.absoluteTolerance < 0.0 ||
+                        !mathSpec.relativeTolerance.isFinite() || mathSpec.relativeTolerance < 0.0
+                    ) {
+                        errors += "Math question ${question.id} has invalid answer tolerances"
+                    }
+                    if (mathSpec.kind == MathAnswerKind.QUANTITY && mathSpec.expectedUnit.isNullOrBlank()) {
+                        errors += "Math question ${question.id} uses QUANTITY without expectedUnit"
+                    }
+                    if (mathSpec.kind == MathAnswerKind.FILL_BLANK) {
+                        val blankCount = Regex("_{2,}|\\.{2,}|…+|□|▢|\\[\\s*\\]")
+                            .findAll(question.question).count()
+                        if (blankCount !in 1..8) {
+                            errors += "Math fill-blank question has an unsupported blank count"
+                        }
+                    }
+                }
+            } else if (spec.mathAnswerSpec != null) {
+                errors += "Non-math question ${question.id} must not use mathAnswerSpec"
             }
 
             if (question.question.isBlank()) {
@@ -3731,5 +3783,17 @@ FAIL.
         hãy chọn cách hỏi đơn giản hơn nhưng chắc chắn nằm trong
         Skill hiện tại.
     """.trimIndent()
+    }
+
+    private fun isNumericAnswer(value: String): Boolean {
+        val normalized = value.trim().replace(',', '.')
+        val simpleNumber = normalized.toDoubleOrNull()
+        if (simpleNumber != null) return simpleNumber.isFinite()
+
+        val fraction = Regex("""^([+-]?\d+(?:\.\d+)?)\s*/\s*([+-]?\d+(?:\.\d+)?)$""")
+            .matchEntire(normalized) ?: return false
+        val numerator = fraction.groupValues[1].toDoubleOrNull() ?: return false
+        val denominator = fraction.groupValues[2].toDoubleOrNull() ?: return false
+        return numerator.isFinite() && denominator.isFinite() && denominator != 0.0
     }
 }
