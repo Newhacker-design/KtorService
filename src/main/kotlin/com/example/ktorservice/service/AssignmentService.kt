@@ -15,6 +15,7 @@ import org.jetbrains.exposed.sql.transactions.transaction
 
 import kotlinx.coroutines.sync.Semaphore
 
+private const val MAX_ASSIGNMENT_GENERATION_ATTEMPTS = 5
 
 class AssignmentService(
     private val aiService: AIService,
@@ -252,14 +253,14 @@ class AssignmentService(
         var lastErrors =
             emptyList<String>()
 
-        for (attempt in 1..3) {
+        for (attempt in 1..MAX_ASSIGNMENT_GENERATION_ATTEMPTS) {
 
             println(
                 "=================================================="
             )
 
             println(
-                "ASSIGNMENT GENERATION ATTEMPT $attempt/3"
+                "ASSIGNMENT GENERATION ATTEMPT $attempt/$MAX_ASSIGNMENT_GENERATION_ATTEMPTS"
             )
 
             println(
@@ -347,7 +348,7 @@ class AssignmentService(
                     lastErrors =
                         validation.errors
 
-                    if (attempt < 3) {
+                    if (attempt < MAX_ASSIGNMENT_GENERATION_ATTEMPTS) {
 
                         println(
                             "REGENERATING BECAUSE VALIDATOR FAILED..."
@@ -357,7 +358,7 @@ class AssignmentService(
                     }
 
                     throw IllegalStateException(
-                        "AI generated assignment failed validation after 3 attempts:\n" +
+                        "AI generated assignment failed validation after $MAX_ASSIGNMENT_GENERATION_ATTEMPTS attempts:\n" +
                                 validation.errors.joinToString("\n")
                     )
                 }
@@ -432,7 +433,7 @@ class AssignmentService(
                             )
                         }
 
-                    if (attempt < 3) {
+                    if (attempt < MAX_ASSIGNMENT_GENERATION_ATTEMPTS) {
 
                         println(
                             "REGENERATING BECAUSE AI QUALITY REVIEW FAILED..."
@@ -442,7 +443,7 @@ class AssignmentService(
                     }
 
                     throw IllegalStateException(
-                        "AI generated assignment failed quality review after 3 attempts:\n" +
+                        "AI generated assignment failed quality review after $MAX_ASSIGNMENT_GENERATION_ATTEMPTS attempts:\n" +
                                 lastErrors.joinToString("\n")
                     )
                 }
@@ -462,7 +463,7 @@ class AssignmentService(
                     "❌ ASSIGNMENT GENERATION ERROR: ${e.message}"
                 )
 
-                if (attempt >= 3) {
+                if (attempt >= MAX_ASSIGNMENT_GENERATION_ATTEMPTS) {
                     throw e
                 }
 
