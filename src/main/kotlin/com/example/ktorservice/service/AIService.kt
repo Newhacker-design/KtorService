@@ -426,68 +426,89 @@ class AIService {
         }
         if (invalidQuestions.isEmpty()) return assignment
 
-        val questionsToRepair = buildJsonArray {
-            invalidQuestions.forEach { question ->
-                add(buildJsonObject {
-                    put("id", question.id)
-                    put("question", question.question)
-                    put("correctOption", answersById[question.id]?.answer.orEmpty())
-                    put("existingOptions", buildJsonArray {
-                        question.options.forEach { option -> add(JsonPrimitive(option)) }
-                    })
-                })
-            }
+        val questionsById = invalidQuestions.associateBy { it.id }
+        val unresolvedIds = invalidQuestions.map { it.id }.toMutableSet()
+        val optionsToRepair = invalidQuestions.associate { it.id to it.options }.toMutableMap()
+        val repairedOptions = mutableMapOf<Int, List<String>>()
+
+        fun optionError(options: List<String>?): String = when {
+            options == null -> "API không trả về options"
+            options.size != 4 -> "có ${options.size} lựa chọn, cần 4"
+            options.any { it.isBlank() } -> "có lựa chọn rỗng"
+            options.map(::normalizeSemanticText).distinct().size != 4 -> "có lựa chọn trùng"
+            else -> ""
         }
-        val prompt = """
-            Bạn là biên tập viên đề Toán lớp $grade, môn $subject.
-            Hãy sửa danh sách lựa chọn cho các câu trắc nghiệm sau.
-            Với MỖI câu, trả đúng 4 phương án A, B, C, D có nội dung khác nhau,
-            không để trống, không lặp ý, không thêm tiền tố A./B./C./D. vào nội dung.
-            Phương án có vị trí bằng correctOption phải là đáp án đúng; giữ đáp án đó
-            nếu nó đã có trong existingOptions, nếu chưa có thì tự giải câu hỏi để tạo.
-            Các phương án sai cần hợp lý nhưng không được cùng giá trị với đáp án đúng.
-            Chỉ trả JSON đúng schema:
-            {"questions":[{"id":1,"options":["...","...","...","..."]}]}
-            Không thêm lời dẫn hoặc markdown.
 
-            Câu cần sửa:
-            $questionsToRepair
-        """.trimIndent()
+        for (repairAttempt in 1..2) {
+            if (unresolvedIds.isEmpty()) break
 
-        val response = callGeminiWithRetry(
-            prompt = prompt,
-            sexEducation = false,
-            temperature = 0.2
-        )
-        val repairedRoot = parseGeminiJsonResponse(response).jsonObject
-        val repairedOptions = repairedRoot["questions"]?.jsonArray
-            ?.associate { element ->
+            val questionsToRepair = buildJsonArray {
+                unresolvedIds.sorted().forEach { id ->
+                    val question = questionsById.getValue(id)
+                    add(buildJsonObject {
+                        put("id", id)
+                        put("question", question.question)
+                        put("correctOption", answersById[id]?.answer.orEmpty())
+                        put("previousOptions", buildJsonArray {
+                            optionsToRepair[id].orEmpty().forEach { option -> add(JsonPrimitive(option)) }
+                        })
+                        put("previousError", optionError(optionsToRepair[id]))
+                    })
+                }
+            }
+            val prompt = """
+                Bạn là biên tập viên đề Toán lớp $grade, môn $subject.
+                Đây là lượt sửa $repairAttempt cho các câu trắc nghiệm còn lỗi.
+                Với MỖI ID được yêu cầu, bắt buộc trả đúng 4 chuỗi phương án khác nhau,
+                không được rỗng, không lặp, không thêm chữ A./B./C./D. vào nội dung.
+                correctOption là vị trí đáp án đúng; phải tự giải câu hỏi và đặt đáp án đúng
+                vào đúng vị trí đó. Không chép lại bộ previousOptions nếu previousError báo lỗi.
+                Chỉ trả JSON theo schema:
+                {"questions":[{"id":1,"options":["...","...","...","..."]}]}
+                Phải có đủ mọi ID trong đầu vào, không thêm lời dẫn hoặc markdown.
+
+                Câu cần sửa:
+                $questionsToRepair
+            """.trimIndent()
+
+            val response = callGeminiWithRetry(
+                prompt = prompt,
+                sexEducation = false,
+                temperature = 0.2
+            )
+            val responseQuestions = parseGeminiJsonResponse(response).jsonObject["questions"]?.jsonArray
+                ?: throw IllegalStateException("Choice repair response is missing questions")
+            val returnedOptions = responseQuestions.associate { element ->
                 val item = element.jsonObject
                 val id = item["id"]?.jsonPrimitive?.intOrNull
                     ?: throw IllegalStateException("Choice repair response is missing a question id")
                 val options = item["options"]?.jsonArray
                     ?.map { it.jsonPrimitive.content.trim() }
-                    ?: throw IllegalStateException("Choice repair response for question $id is missing options")
                 id to options
             }
-            ?: throw IllegalStateException("Choice repair response is missing questions")
 
-        val expectedIds = invalidQuestions.map { it.id }.toSet()
-        if (repairedOptions.keys != expectedIds) {
-            throw IllegalStateException("Choice repair response returned unexpected question IDs")
+            unresolvedIds.toList().forEach { id ->
+                val options = returnedOptions[id]
+                if (optionError(options).isEmpty() && options != null) {
+                    repairedOptions[id] = options
+                    unresolvedIds.remove(id)
+                } else if (options != null) {
+                    optionsToRepair[id] = options
+                }
+            }
         }
 
-        val updated = assignment.copy(questions = assignment.questions.map { question ->
-            val options = repairedOptions[question.id] ?: return@map question
-            if (options.size != 4 || options.any { it.isBlank() } ||
-                options.map(::normalizeSemanticText).distinct().size != 4
-            ) {
-                throw IllegalStateException("Choice repair did not produce four distinct options for question ${question.id}")
+        if (unresolvedIds.isNotEmpty()) {
+            val details = unresolvedIds.sorted().joinToString("; ") { id ->
+                "Q$id: ${optionError(optionsToRepair[id])}"
             }
-            question.copy(options = options)
+            throw IllegalStateException("Choice repair failed after 2 focused attempts: $details")
+        }
+
+        println("[AIService] Repaired multiple-choice options for question IDs ${repairedOptions.keys.sorted()}")
+        return assignment.copy(questions = assignment.questions.map { question ->
+            question.copy(options = repairedOptions[question.id] ?: question.options)
         })
-        println("[AIService] Repaired multiple-choice options for question IDs ${expectedIds.sorted()}")
-        return updated
     }
 
     private fun isMathSubject(subject: String): Boolean =
