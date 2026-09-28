@@ -103,6 +103,7 @@ class AIService {
         CALCULATION,
         FILL_BLANK,
         MULTIPLE_CHOICE,
+        TRUE_FALSE_SET,
         ORDERED_TUPLE,
         UNORDERED_SET,
         QUANTITY,
@@ -166,7 +167,9 @@ class AIService {
         val gradingMethod: GradingMethod,
         val sourceType: QuestionSourceType =
             QuestionSourceType.SELF_CONTAINED,
-        val gradingSpec: GradingSpec = GradingSpec()
+        val gradingSpec: GradingSpec = GradingSpec(),
+        val options: List<String> = emptyList(),
+        val statements: List<String> = emptyList()
     )
 
     @Serializable
@@ -428,7 +431,7 @@ class AIService {
             normalizedSubject.contains("anh") ||
                     normalizedSubject.contains("english")
 
-        val questions = when {
+        val baseQuestions = when {
             isMath -> createMathBlueprint(difficulty)
 
             isLanguage -> listOf(
@@ -502,6 +505,28 @@ class AIService {
                     "Không hỏi lại cùng kiến thức."
                 )
             )
+        }
+
+        val questions = if (!isMath) baseQuestions else {
+            val count = mathQuestionCount(grade)
+            val levels = when (grade) {
+                in 1..5 -> List(5) { CognitiveLevel.RECALL } +
+                        List(4) { CognitiveLevel.UNDERSTAND } + CognitiveLevel.APPLY
+                in 6..9 -> List(6) { CognitiveLevel.RECALL } +
+                        List(6) { CognitiveLevel.UNDERSTAND } +
+                        List(3) { CognitiveLevel.APPLY } + CognitiveLevel.REASON
+                else -> List(12) { CognitiveLevel.UNDERSTAND } +
+                        List(4) { CognitiveLevel.APPLY } + List(6) { CognitiveLevel.REASON }
+            }
+            (1..count).map { index ->
+                val template = baseQuestions[(index - 1) % baseQuestions.size]
+                template.copy(
+                    id = index,
+                    cognitiveLevel = levels[index - 1],
+                    purpose = "Thiết kế câu $index theo ma trận Toán lớp $grade, đúng mức độ nhận thức và chủ đề được phân bổ.",
+                    avoid = "Không lặp lại câu khác; không vượt chương trình lớp $grade."
+                )
+            }
         }
 
         return GenerationBlueprint(
@@ -593,6 +618,27 @@ class AIService {
         }
     }
 
+    private fun mathQuestionCount(grade: Int): Int = when (grade) {
+        in 1..5 -> 10
+        in 6..9 -> 16
+        else -> 22
+    }
+
+    private fun mathQuestionPoints(grade: Int, questionId: Int): Double = when (grade) {
+        in 1..5 -> 1.0
+        in 6..9 -> when (questionId) {
+            in 1..7 -> 0.5
+            in 8..9 -> 1.0
+            in 10..14 -> 0.6
+            else -> 0.75
+        }
+        else -> when (questionId) {
+            in 1..12 -> 0.25
+            in 13..16 -> 1.0
+            else -> 0.5
+        }
+    }
+
     private fun createSexEducationBlueprint(
         grade: Int,
         topic: String,
@@ -651,9 +697,8 @@ class AIService {
             }
 
             appendLine("YÊU CẦU TIẾN TRIỂN NHẬN THỨC:")
-            appendLine("- Q1: nền tảng, hiểu kiến thức.")
-            appendLine("- Q2: vận dụng vào dữ kiện/ngữ cảnh khác.")
-            appendLine("- Q3: suy luận/phân tích/giải quyết vấn đề khi phù hợp.")
+            appendLine("- Mỗi câu phải thể hiện cognitive level và mục tiêu riêng ghi phía trên.")
+            appendLine("- Phân bố độ khó phải theo ma trận của cấp/lớp được yêu cầu.")
             appendLine("- Không tăng độ khó chỉ bằng số lớn hơn.")
             appendLine("- Không đổi tên nhân vật để giả tạo độ khó.")
             appendLine()
@@ -728,6 +773,46 @@ class AIService {
                 learningStepSkill = learningStepSkill,
                 learningStepDescription = learningStepDescription
             )
+        val isMathSubject = subject.contains("toán", ignoreCase = true) ||
+                subject.contains("math", ignoreCase = true)
+        val questionCount = if (isMathSubject) mathQuestionCount(grade) else 3
+        val matrixInstructions = if (!isMathSubject) "" else when (grade) {
+            in 1..5 -> """
+                MA TRẬN TOÁN TIỂU HỌC: 10 câu, tổng 10 điểm. Câu 1-8 thuộc Số học và phép tính (8 điểm), câu 9-10 thuộc Hình học và đo lường (2 điểm). Mức độ: câu 1-5 Mức 1, câu 6-9 Mức 2, câu 10 Mức 3. Cả 10 câu là trắc nghiệm 4 lựa chọn; mỗi câu 1 điểm.
+            """.trimIndent()
+            in 6..9 -> """
+                MA TRẬN TOÁN THCS (16 câu): 9 câu Số và Đại số (5.5 điểm; ID 1-9), 5 câu Hình học và Đo lường (3 điểm; ID 10-14), 2 câu Thống kê và Xác suất (1.5 điểm; ID 15-16). Mức độ: 6 Nhận biết, 6 Thông hiểu, 3 Vận dụng, 1 Vận dụng cao (dùng đúng cognitive level của từng ID trong blueprint). Câu 1-11 trắc nghiệm 4 lựa chọn; câu 12-16 tự luận/trả lời ngắn. Điểm câu 1-7 là 0.5; câu 8-9 là 1.0; câu 10-14 là 0.6; câu 15-16 là 0.75.
+            """.trimIndent()
+            else -> """
+                MA TRẬN TOÁN THPT: 22 câu, tổng 10 điểm. Câu 1-12 trắc nghiệm 4 lựa chọn (0.25 điểm/câu); câu 13-16 Đúng/Sai, mỗi câu có 4 mệnh đề (1 điểm/câu, chấm theo số ý đúng); câu 17-22 trả lời ngắn (0.5 điểm/câu). Chủ đề theo ID: 1-2 Lượng giác; 3 Dãy số/Cấp số; 4-5 Mũ/Logarit; 6-7 Hình học không gian; 8 Xác suất cổ điển; 9 Xác suất; 10-12 Hàm số; 13 Vectơ trong không gian; 14-17 Nguyên hàm/Tích phân; 18 Mẫu số liệu ghép nhóm; 19-22 Hình học Oxyz. Câu Đúng/Sai phải có "statements" gồm 4 mệnh đề và đáp án chuẩn là bốn ký hiệu Đ/S phân cách bằng dấu phẩy.
+            """.trimIndent()
+        }
+        val choiceCount = if (!isMathSubject) 0 else when (grade) {
+            in 1..5 -> 10
+            in 6..9 -> 11
+            else -> 12
+        }
+        val trueFalseIds = if (isMathSubject && grade >= 10) (13..16).toSet() else emptySet()
+        val questionExamples = (1..questionCount).joinToString(",\n") { id ->
+            val isChoice = id <= choiceCount
+            val isTrueFalse = id in trueFalseIds
+            val type = if (!isMathSubject || isChoice || isTrueFalse) "TEXT" else "HANDWRITING"
+            val method = if (!isMathSubject) "AI_TEXT" else if (isChoice || isTrueFalse) "EXACT" else "OCR_AI"
+            val localMethod = if (!isMathSubject || isChoice || isTrueFalse) "EXACT" else "NUMERIC"
+            val mathKind = when {
+                isChoice -> "MULTIPLE_CHOICE"
+                isTrueFalse -> "TRUE_FALSE_SET"
+                else -> "NUMBER"
+            }
+            val points = if (isMathSubject) mathQuestionPoints(grade, id) else if (id == questionCount) 4.0 else 3.0
+            val mathSpec = if (isMathSubject) "\"mathAnswerSpec\":{\"kind\":\"$mathKind\"}" else "\"mathAnswerSpec\":null"
+            val optionsExample = if (isChoice) "[\"Lựa chọn A\",\"Lựa chọn B\",\"Lựa chọn C\",\"Lựa chọn D\"]" else "[]"
+            val statementsExample = if (isTrueFalse) "[\"Mệnh đề a\",\"Mệnh đề b\",\"Mệnh đề c\",\"Mệnh đề d\"]" else "[]"
+            """            {"id":$id,"question":"...","learningObjective":"...","points":$points,"answerType":"$type","gradingMethod":"$method","sourceType":"SELF_CONTAINED","options":$optionsExample,"statements":$statementsExample,"gradingSpec":{"method":"$localMethod","acceptedAnswers":[],"requiredConcepts":[],"$mathSpec}}"""
+        }
+        val answerExamples = (1..questionCount).joinToString(",\n") { id ->
+            "            {\"id\":$id,\"answer\":\"...\"}"
+        }
 
         return """
         Bạn là giáo viên Việt Nam có kinh nghiệm thiết kế bài tập
@@ -741,6 +826,8 @@ class AIService {
         - Mô tả độ khó: $difficultyText
 
       ${blueprintAsPrompt(blueprint)}
+
+        $matrixInstructions
 
            $learningStepContext
 
@@ -760,15 +847,12 @@ class AIService {
         - chỉ đổi tên;
         - chỉ thay vài từ;
         - giữ nguyên context;
-        - dùng cùng cách giải cho cả 3 câu;
+        - dùng cùng cách giải cho nhiều câu;
         - hỏi cùng kiến thức ba lần;
         - làm Q2/Q3 dài hơn nhưng không sâu hơn.
 
         === CẤU TRÚC NHẬN THỨC ===
-        Q1: nền tảng, hiểu và sử dụng kiến thức cốt lõi.
-        Q2: vận dụng, tình huống thực tế, so sánh hoặc giải thích.
-        Q3: suy luận, phân tích, error analysis, cause-effect,
-        decision hoặc problem solving.
+        Tuân theo cognitive level và purpose ghi ở từng câu trong blueprint.
 
         === CHẤT LƯỢNG NGÔN NGỮ ===
         Không được tạo:
@@ -787,6 +871,15 @@ class AIService {
         - TEXT
         - HANDWRITING
         - SPEECH_TO_TEXT
+
+        Nếu môn là Toán, số câu, chủ đề, dạng câu và điểm phải theo MA TRẬN TOÁN.
+        Với câu trắc nghiệm, thêm "options" là mảng đúng 4 nội dung lựa chọn,
+        không tự thêm chữ A./B. vào nội dung; answerKey.answer và
+        gradingSpec.correctAnswer dùng duy nhất chữ cái A, B, C hoặc D.
+        Dùng answerType=TEXT, gradingMethod=EXACT và
+        gradingSpec.mathAnswerSpec.kind=MULTIPLE_CHOICE.
+        Với câu Đúng/Sai, thêm "statements" là đúng 4 mệnh đề; đáp án chuẩn
+        ghi theo thứ tự bốn ký hiệu Đ/S; dùng kind=TRUE_FALSE_SET.
 
         Mapping:
         - TEXT -> EXACT hoặc AI_TEXT
@@ -840,14 +933,14 @@ class AIService {
         - Ưu tiên SELF_CONTAINED nếu câu hỏi đã đủ dữ kiện.
 
         === ĐIỂM ===
-        Chính xác 3 câu, tổng 10 điểm.
+        Chính xác $questionCount câu, tổng 10 điểm.
 
         === TỰ KIỂM TRA ===
-        - Đúng 3 câu.
-        - ID 1,2,3.
+        - Đúng $questionCount câu.
+        - ID liên tục từ 1 đến $questionCount.
         - Có learningObjective.
-        - Q1/Q2/Q3 khác nhau về tư duy.
-        - Có đúng 3 answerKey.
+        - Các câu khác nhau về kỹ năng, dữ kiện hoặc cách vận dụng theo blueprint.
+        - Có đúng $questionCount answerKey.
         - ID answerKey khớp.
         - Tổng điểm = 10.
         - GradingGuide khớp.
@@ -866,7 +959,7 @@ class AIService {
         - REQUIRED_CONCEPTS: dùng cho câu trả lời ngắn có 2-5 ý bắt buộc kiểm tra được.
         - STEP_RUBRIC: chỉ dùng cho bài Toán nhiều bước; rubric.version hiện là 1, criteria phải có id, description, points, method và bằng chứng chấm được. Các method tiêu chí: EVIDENCE (acceptedEvidence), REQUIRED_CONCEPTS (requiredConcepts), FINAL_NUMERIC (expectedNumber, numericTolerance). Tổng points của criteria phải bằng điểm câu.
           Cấu trúc: "rubric":{"version":1,"criteria":[{"id":"method","description":"...","points":1,"method":"REQUIRED_CONCEPTS","requiredConcepts":["..."]},{"id":"work","description":"...","points":1,"method":"EVIDENCE","acceptedEvidence":["..."]},{"id":"final","description":"...","points":1,"method":"FINAL_NUMERIC","expectedNumber":"...","numericTolerance":0}]}. Chỉ sinh tiêu chí có thể nhận diện trong câu trả lời.
-        Nếu môn học là Toán, mọi câu phải có gradingSpec.mathAnswerSpec với kind cụ thể: NUMBER, CALCULATION, FILL_BLANK, MULTIPLE_CHOICE, ORDERED_TUPLE, UNORDERED_SET, QUANTITY hoặc SYMBOLIC_EXPRESSION; không dùng AUTO. NUMBER: answerKey.answer chỉ là số/phân số, không kèm đơn vị hay lời giải. CALCULATION: dùng khi đáp án chuẩn là biểu thức/phương trình cần tính. FILL_BLANK: chỉ chọn khi question có từ 1 đến 8 placeholder hiển thị nguyên văn bằng ___, □ hoặc [ ]; luôn ưu tiên □ để tránh nhầm dấu câu. Nếu không có placeholder thì không được khai báo FILL_BLANK. Với nhiều chỗ trống, answerKey.answer chỉ ghi các giá trị theo thứ tự, phân cách bằng dấu chấm phẩy. QUANTITY phải có expectedUnit. Với biểu thức ký hiệu chỉ chấp nhận acceptedAnswers được liệt kê tường minh; không giả định tương đương đại số.
+        Nếu môn học là Toán, mọi câu phải có gradingSpec.mathAnswerSpec với kind cụ thể: NUMBER, CALCULATION, FILL_BLANK, MULTIPLE_CHOICE, TRUE_FALSE_SET, ORDERED_TUPLE, UNORDERED_SET, QUANTITY hoặc SYMBOLIC_EXPRESSION; không dùng AUTO. NUMBER: answerKey.answer chỉ là số/phân số, không kèm đơn vị hay lời giải. CALCULATION: dùng khi đáp án chuẩn là biểu thức/phương trình cần tính. FILL_BLANK: chỉ chọn khi question có từ 1 đến 8 placeholder hiển thị nguyên văn bằng ___, □ hoặc [ ]; luôn ưu tiên □ để tránh nhầm dấu câu. Nếu không có placeholder thì không được khai báo FILL_BLANK. Với nhiều chỗ trống, answerKey.answer chỉ ghi các giá trị theo thứ tự, phân cách bằng dấu chấm phẩy. QUANTITY phải có expectedUnit. Với biểu thức ký hiệu chỉ chấp nhận acceptedAnswers được liệt kê tường minh; không giả định tương đương đại số.
         Không dùng gradingSpec cho bài luận mở hoặc ý kiến chủ quan. acceptedAnswers chỉ chứa biến thể đúng.
 
         $previousText
@@ -880,77 +973,10 @@ class AIService {
           "title": "Tên bài",
           "learningMaterial": null,
           "questions": [
-            {
-              "id": 1,
-              "question": "...",
-              "learningObjective": "...",
-              "points": 3,
-              "answerType": "TEXT",
-              "gradingMethod": "AI_TEXT",
-              "sourceType": "SELF_CONTAINED",
-              "gradingSpec": {
-                "method": "EXACT",
-                "acceptedAnswers": ["..."],
-                "requiredConcepts": [],
-                "caseSensitive": false,
-                "ignoreWhitespace": true,
-                "ignorePunctuation": false,
-                "numericTolerance": 0,
-                "allowPartialCredit": false
-              }
-            },
-            {
-              "id": 2,
-              "question": "...",
-              "learningObjective": "...",
-              "points": 3,
-              "answerType": "HANDWRITING",
-              "gradingMethod": "OCR_AI",
-              "sourceType": "SELF_CONTAINED",
-              "gradingSpec": {
-                "method": "NUMERIC",
-                "acceptedAnswers": [],
-                "requiredConcepts": [],
-                "caseSensitive": false,
-                "ignoreWhitespace": true,
-                "ignorePunctuation": false,
-                "numericTolerance": 0,
-                "allowPartialCredit": false
-              }
-            },
-            {
-              "id": 3,
-              "question": "...",
-              "learningObjective": "...",
-              "points": 4,
-              "answerType": "HANDWRITING",
-              "gradingMethod": "OCR_AI",
-              "sourceType": "SELF_CONTAINED",
-              "gradingSpec": {
-                "method": "REQUIRED_CONCEPTS",
-                "acceptedAnswers": [],
-                "requiredConcepts": ["...", "..."],
-                "caseSensitive": false,
-                "ignoreWhitespace": false,
-                "ignorePunctuation": true,
-                "numericTolerance": 0,
-                "allowPartialCredit": true
-              }
-            }
+$questionExamples
           ],
           "answerKey": [
-            {
-              "id": 1,
-              "answer": "..."
-            },
-            {
-              "id": 2,
-              "answer": "..."
-            },
-            {
-              "id": 3,
-              "answer": "..."
-            }
+$answerExamples
           ],
           "gradingGuide": "...",
           "totalScore": 10
@@ -1126,7 +1152,7 @@ $learningStepContext
         - REQUIRED_CONCEPTS: dùng cho câu trả lời ngắn có 2-5 ý bắt buộc kiểm tra được.
         - STEP_RUBRIC: chỉ dùng cho bài Toán nhiều bước; rubric.version hiện là 1, criteria phải có id, description, points, method và bằng chứng chấm được. Các method tiêu chí: EVIDENCE (acceptedEvidence), REQUIRED_CONCEPTS (requiredConcepts), FINAL_NUMERIC (expectedNumber, numericTolerance). Tổng points của criteria phải bằng điểm câu.
           Cấu trúc: "rubric":{"version":1,"criteria":[{"id":"method","description":"...","points":1,"method":"REQUIRED_CONCEPTS","requiredConcepts":["..."]},{"id":"work","description":"...","points":1,"method":"EVIDENCE","acceptedEvidence":["..."]},{"id":"final","description":"...","points":1,"method":"FINAL_NUMERIC","expectedNumber":"...","numericTolerance":0}]}. Chỉ sinh tiêu chí có thể nhận diện trong câu trả lời.
-        Nếu môn học là Toán, mọi câu phải có gradingSpec.mathAnswerSpec với kind cụ thể: NUMBER, CALCULATION, FILL_BLANK, MULTIPLE_CHOICE, ORDERED_TUPLE, UNORDERED_SET, QUANTITY hoặc SYMBOLIC_EXPRESSION; không dùng AUTO. NUMBER: answerKey.answer chỉ là số/phân số, không kèm đơn vị hay lời giải. CALCULATION: dùng khi đáp án chuẩn là biểu thức/phương trình cần tính. FILL_BLANK: chỉ chọn khi question có từ 1 đến 8 placeholder hiển thị nguyên văn bằng ___, □ hoặc [ ]; luôn ưu tiên □ để tránh nhầm dấu câu. Nếu không có placeholder thì không được khai báo FILL_BLANK. Với nhiều chỗ trống, answerKey.answer chỉ ghi các giá trị theo thứ tự, phân cách bằng dấu chấm phẩy. QUANTITY phải có expectedUnit. Với biểu thức ký hiệu chỉ chấp nhận acceptedAnswers được liệt kê tường minh; không giả định tương đương đại số.
+        Nếu môn học là Toán, mọi câu phải có gradingSpec.mathAnswerSpec với kind cụ thể: NUMBER, CALCULATION, FILL_BLANK, MULTIPLE_CHOICE, TRUE_FALSE_SET, ORDERED_TUPLE, UNORDERED_SET, QUANTITY hoặc SYMBOLIC_EXPRESSION; không dùng AUTO. NUMBER: answerKey.answer chỉ là số/phân số, không kèm đơn vị hay lời giải. CALCULATION: dùng khi đáp án chuẩn là biểu thức/phương trình cần tính. FILL_BLANK: chỉ chọn khi question có từ 1 đến 8 placeholder hiển thị nguyên văn bằng ___, □ hoặc [ ]; luôn ưu tiên □ để tránh nhầm dấu câu. Nếu không có placeholder thì không được khai báo FILL_BLANK. Với nhiều chỗ trống, answerKey.answer chỉ ghi các giá trị theo thứ tự, phân cách bằng dấu chấm phẩy. QUANTITY phải có expectedUnit. Với biểu thức ký hiệu chỉ chấp nhận acceptedAnswers được liệt kê tường minh; không giả định tương đương đại số.
         Không dùng gradingSpec cho bài luận mở hoặc ý kiến chủ quan. acceptedAnswers chỉ chứa biến thể đúng.
 
         $previousText
@@ -1887,7 +1913,11 @@ $learningStepContext
                     answerType = answerType,
                     gradingMethod = gradingMethod,
                     sourceType = sourceType,
-                    gradingSpec = gradingSpec
+                    gradingSpec = gradingSpec,
+                    options = q["options"]?.jsonArray?.map { it.jsonPrimitive.content.trim() }
+                        ?: emptyList(),
+                    statements = q["statements"]?.jsonArray?.map { it.jsonPrimitive.content.trim() }
+                        ?: emptyList()
                 )
             }
 
@@ -2121,22 +2151,23 @@ $learningStepContext
             errors += "Assignment title is too short"
         }
 
-        if (assignment.questions.size != 3) {
-            errors += "Assignment must have exactly 3 questions"
+        val expectedQuestionCount = if (isMathSubject) mathQuestionCount(grade) else 3
+        if (assignment.questions.size != expectedQuestionCount) {
+            errors += "Assignment must have exactly $expectedQuestionCount questions"
         }
 
-        val expectedIds = listOf(1, 2, 3)
+        val expectedIds = (1..expectedQuestionCount).toList()
 
         if (assignment.questions.map { it.id } != expectedIds) {
-            errors += "Question IDs must be exactly 1,2,3"
+            errors += "Question IDs must be continuous from 1 to $expectedQuestionCount"
         }
 
-        if (assignment.answerKey.size != 3) {
-            errors += "Assignment must have exactly 3 answers"
+        if (assignment.answerKey.size != expectedQuestionCount) {
+            errors += "Assignment must have exactly $expectedQuestionCount answers"
         }
 
         if (assignment.answerKey.map { it.id }.sorted() != expectedIds) {
-            errors += "Answer IDs must be exactly 1,2,3"
+            errors += "Answer IDs must match the question IDs 1 through $expectedQuestionCount"
         }
 
         if (assignment.gradingGuide.trim().length < 10) {
@@ -2426,6 +2457,21 @@ $learningStepContext
 
             val answer = answersById[question.id]
 
+            if (question.options.isNotEmpty()) {
+                if (question.options.size != 4 ||
+                    question.options.any { it.isBlank() } ||
+                    question.options.map { normalizeSemanticText(it) }.distinct().size != 4
+                ) {
+                    errors += "Question ${question.id} must have exactly 4 distinct non-empty choices"
+                }
+                if (answer?.answer?.trim()?.uppercase(Locale.ROOT) !in setOf("A", "B", "C", "D")) {
+                    errors += "Multiple-choice question ${question.id} answer must be A, B, C, or D"
+                }
+                if (isMathSubject && question.gradingSpec.mathAnswerSpec?.kind != MathAnswerKind.MULTIPLE_CHOICE) {
+                    errors += "Math multiple-choice question ${question.id} must use MULTIPLE_CHOICE grading"
+                }
+            }
+
             if (answer == null) {
                 errors +=
                     "Missing answer for question ${question.id}"
@@ -2437,6 +2483,49 @@ $learningStepContext
             ) {
                 errors +=
                     "Answer ${answer.id} contains suspicious text"
+            }
+        }
+
+        if (isMathSubject) {
+            val choiceCount = when (grade) {
+                in 1..5 -> 10
+                in 6..9 -> 11
+                else -> 12
+            }
+            assignment.questions.forEach { question ->
+                val expectsChoice = question.id <= choiceCount
+                val expectsTrueFalse = grade >= 10 && question.id in 13..16
+                val expectedPoints = mathQuestionPoints(grade, question.id)
+                if (abs(question.points - expectedPoints) > 0.001) {
+                    errors += "Math question ${question.id} must be worth $expectedPoints points in its grade matrix"
+                }
+                if (expectsChoice && question.options.size != 4) {
+                    errors += "Math question ${question.id} must include four choices"
+                }
+                if (!expectsChoice && question.options.isNotEmpty()) {
+                    errors += "Math question ${question.id} must be a written/structured response"
+                }
+                if (expectsTrueFalse && question.statements.size != 4) {
+                    errors += "True/false question ${question.id} must include four statements"
+                }
+                if (!expectsTrueFalse && question.statements.isNotEmpty()) {
+                    errors += "Question ${question.id} has unexpected true/false statements"
+                }
+                val answer = assignment.answerKey.firstOrNull { it.id == question.id }?.answer.orEmpty().trim()
+                if (expectsChoice && answer.uppercase(Locale.ROOT) !in setOf("A", "B", "C", "D")) {
+                    errors += "Multiple-choice question ${question.id} answer must be A, B, C, or D"
+                }
+                if (expectsChoice && question.gradingSpec.mathAnswerSpec?.kind != MathAnswerKind.MULTIPLE_CHOICE) {
+                    errors += "Multiple-choice question ${question.id} must use MULTIPLE_CHOICE grading"
+                }
+                if (expectsTrueFalse) {
+                    val truthValues = Regex("(?i)(đúng|sai|true|false|đ|s)(?![\\p{L}])")
+                        .findAll(answer).count()
+                    if (truthValues != 4) errors += "True/false answer ${question.id} must contain four Đ/S values"
+                    if (question.gradingSpec.mathAnswerSpec?.kind != MathAnswerKind.TRUE_FALSE_SET) {
+                        errors += "True/false question ${question.id} must use TRUE_FALSE_SET grading"
+                    }
+                }
             }
         }
 
@@ -2732,6 +2821,25 @@ $learningStepContext
         learningStepDescription: String? = null
     ): String {
 
+        val isMathSubject = subject.contains("toán", ignoreCase = true) ||
+                subject.contains("math", ignoreCase = true)
+        val expectedQuestionCount = if (isMathSubject) mathQuestionCount(grade) else 3
+        val cognitiveReview = if (isMathSubject) {
+            "Kiểm tra đủ $expectedQuestionCount câu và phân bố mức độ theo blueprint/ma trận; không yêu cầu chỉ 3 câu."
+        } else {
+            "Q1 nền tảng, Q2 vận dụng, Q3 suy luận/phân tích. Nếu cả 3 câu chỉ cùng một thao tác thì FAIL."
+        }
+        val pedagogyReview = if (isMathSubject) {
+            "Toàn bộ câu hỏi phải tuân thủ ma trận theo lớp, dạng câu, điểm và phạm vi kiến thức."
+        } else {
+            "Không được tạo ba câu chỉ để đủ số lượng. Ba câu phải tạo progression Q1 hiểu nền tảng, Q2 vận dụng, Q3 suy luận/phân tích."
+        }
+        val matrixReview = if (!isMathSubject) "" else when (grade) {
+            in 1..5 -> "10 câu; ID 1-8 số học, 9-10 hình học; cả 10 câu bốn lựa chọn, 1 điểm/câu."
+            in 6..9 -> "16 câu; ID 1-9 đại số, 10-14 hình học, 15-16 thống kê/xác suất; ID 1-11 có 4 lựa chọn; điểm phải theo ma trận 0.5/1.0/0.6/0.75."
+            else -> "22 câu; ID 1-12 có 4 lựa chọn; ID 13-16 có 4 mệnh đề đúng/sai và tính điểm theo tỉ lệ; ID 17-22 trả lời ngắn; điểm 0.25/1/0.5 theo phần."
+        }
+
         val questionsText = assignment.questions
             .joinToString("\n\n") { q ->
                 """
@@ -2742,6 +2850,8 @@ $learningStepContext
             Answer type: ${q.answerType}
             Grading method: ${q.gradingMethod}
             Source type: ${q.sourceType}
+            Choices: ${q.options.mapIndexed { index, value -> "${('A'.code + index).toChar()}. $value" }.ifEmpty { listOf("(none)") }.joinToString(" | ")}
+            Statements: ${q.statements.mapIndexed { index, value -> "${('a'.code + index).toChar()}) $value" }.ifEmpty { listOf("(none)") }.joinToString(" | ")}
             """.trimIndent()
             }
 
@@ -2776,6 +2886,9 @@ $learningStepContext
 $learningStepContext
         === BLUEPRINT MONG MUỐN ===
         ${blueprintAsPrompt(blueprint)}
+
+        === MA TRẬN CẦN ĐỐI CHIẾU ===
+        $matrixReview
 
         === ASSIGNMENT ===
 
@@ -2920,14 +3033,7 @@ Nếu một hoặc nhiều câu vượt current LearningStep:
 FAIL.
         6. COGNITIVE PROGRESSION
 
-        Q1 phải thiên về hiểu/nền tảng.
-
-        Q2 phải thiên về vận dụng.
-
-        Q3 phải thiên về reasoning/phân tích khi môn học cho phép.
-
-        Nếu cả 3 câu thực chất chỉ dùng cùng một thao tác:
-        FAIL.
+        $cognitiveReview
 
         ------------------------------------------------------------
 
@@ -2942,7 +3048,7 @@ FAIL.
         - cùng answer pattern;
         - cùng cách giải;
         - cùng learning objective;
-        - Q2/Q3 chỉ dài hơn nhưng không sâu hơn.
+        - các câu sau chỉ dài hơn nhưng không sâu hơn.
 
         PASS nếu:
 
@@ -2958,9 +3064,7 @@ FAIL.
 
         Với từng Q:
 
-        Q1 -> Answer 1
-        Q2 -> Answer 2
-        Q3 -> Answer 3
+        Question N phải khớp Answer N với mọi ID từ 1 đến $expectedQuestionCount.
 
         Phải kiểm tra:
 
@@ -3010,13 +3114,7 @@ FAIL.
 
         Bài tập phải có giá trị giáo dục.
 
-        Không được tạo ba câu chỉ để đủ số lượng.
-
-        Ba câu phải tạo thành một progression hợp lý:
-
-        Q1 -> hiểu nền tảng
-        Q2 -> vận dụng
-        Q3 -> suy luận/phân tích
+        $pedagogyReview
 
         ------------------------------------------------------------
 
@@ -3855,7 +3953,7 @@ FAIL.
 
     1. LearningStep hiện tại là mục tiêu curriculum chính của bài này.
 
-    2. Cả 3 câu hỏi phải chủ yếu đánh giá SKILL của LearningStep
+    2. Tất cả câu hỏi phải chủ yếu đánh giá SKILL của LearningStep
        hiện tại.
 
     3. Không được tự ý chuyển sang kỹ năng của LearningStep tiếp theo.
@@ -3864,7 +3962,7 @@ FAIL.
 
     5. Nếu Topic rộng hơn LearningStep thì LearningStep được ưu tiên.
 
-    6. Q1, Q2 và Q3 có thể khác nhau về:
+    6. Các câu có thể khác nhau về:
        - ngữ cảnh;
        - dữ kiện;
        - cách hỏi;

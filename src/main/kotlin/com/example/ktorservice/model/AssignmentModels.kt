@@ -12,7 +12,9 @@ data class QuestionMetadata(
     val gradingMethod: AIService.GradingMethod,
     val sourceType: AIService.QuestionSourceType =
         AIService.QuestionSourceType.SELF_CONTAINED,
-    val gradingSpec: AIService.GradingSpec? = null
+    val gradingSpec: AIService.GradingSpec? = null,
+    val options: List<String> = emptyList(),
+    val statements: List<String> = emptyList()
 )
 @Serializable
 data class AssignmentGenerateResponse(
@@ -118,7 +120,9 @@ data class AssignmentQuestion(
     val gradingMethod: AIService.GradingMethod,
     val sourceType: AIService.QuestionSourceType =
         AIService.QuestionSourceType.SELF_CONTAINED,
-    val gradingSpec: AIService.GradingSpec? = null
+    val gradingSpec: AIService.GradingSpec? = null,
+    val options: List<String> = emptyList(),
+    val statements: List<String> = emptyList()
 )
 
 @Serializable

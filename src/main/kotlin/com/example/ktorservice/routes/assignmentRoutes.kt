@@ -509,7 +509,9 @@ fun Route.assignmentRoutes(
                                             metadata.gradingMethod,
 
                                         gradingSpec =
-                                            metadata.gradingSpec
+                                            metadata.gradingSpec,
+                                        options = metadata.options,
+                                        statements = metadata.statements
                                     )
                                 },
 
@@ -775,7 +777,9 @@ fun Route.assignmentRoutes(
                                             metadata.gradingMethod,
 
                                         gradingSpec =
-                                            metadata.gradingSpec
+                                            metadata.gradingSpec,
+                                        options = metadata.options,
+                                        statements = metadata.statements
                                     )
                                 },
 
@@ -1153,7 +1157,9 @@ fun Route.assignmentRoutes(
                                                 metadata.gradingMethod,
 
                                             gradingSpec =
-                                                metadata.gradingSpec
+                                                metadata.gradingSpec,
+                                            options = metadata.options,
+                                            statements = metadata.statements
                                         )
                                     },
 

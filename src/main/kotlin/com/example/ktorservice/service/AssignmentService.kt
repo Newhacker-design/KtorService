@@ -515,6 +515,8 @@ class AssignmentService(
                         answerType = question.answerType,
                         gradingMethod = question.gradingMethod,
                         sourceType = question.sourceType,
+                        options = question.options,
+                        statements = question.statements,
                         gradingSpec = question.gradingSpec.copy(
                             correctAnswer = generatedAnswersById[question.id]?.answer
                                 ?: throw IllegalStateException(
@@ -615,6 +617,8 @@ class AssignmentService(
                                     answerType = question.answerType,
                                     gradingMethod = question.gradingMethod,
                                     sourceType = question.sourceType,
+                                    options = question.options,
+                                    statements = question.statements,
                                     gradingSpec = question.gradingSpec.copy(
                                         correctAnswer = generatedAnswersById[question.id]?.answer
                                             ?: throw IllegalStateException(
@@ -1316,7 +1320,9 @@ class AssignmentService(
                     answerType = metadata.answerType,
                     gradingMethod = metadata.gradingMethod,
                     sourceType = metadata.sourceType,
-                    gradingSpec = metadata.gradingSpec ?: AIService.GradingSpec()
+                    gradingSpec = metadata.gradingSpec ?: AIService.GradingSpec(),
+                    options = metadata.options,
+                    statements = metadata.statements
                 )
             }
 
@@ -1892,6 +1898,13 @@ class AssignmentService(
             builder.appendLine(
                 question.question
             )
+
+            question.options.forEachIndexed { index, option ->
+                builder.appendLine("${('A'.code + index).toChar()}. $option")
+            }
+            question.statements.forEachIndexed { index, statement ->
+                builder.appendLine("${('a'.code + index).toChar()}) $statement")
+            }
 
             builder.appendLine()
         }
