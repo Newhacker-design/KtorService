@@ -461,10 +461,12 @@ class AIService {
                 Đây là lượt sửa $repairAttempt cho các câu trắc nghiệm còn lỗi.
                 Với MỖI ID được yêu cầu, bắt buộc trả đúng 4 chuỗi phương án khác nhau,
                 không được rỗng, không lặp, không thêm chữ A./B./C./D. vào nội dung.
+                Mỗi phương án phải là nội dung cụ thể phù hợp câu hỏi; tuyệt đối không dùng
+                dấu ba chấm, "Lựa chọn A", "Phương án 1" hoặc văn bản giữ chỗ.
                 correctOption là vị trí đáp án đúng; phải tự giải câu hỏi và đặt đáp án đúng
                 vào đúng vị trí đó. Không chép lại bộ previousOptions nếu previousError báo lỗi.
-                Chỉ trả JSON theo schema:
-                {"questions":[{"id":1,"options":["...","...","...","..."]}]}
+                Chỉ trả một JSON object có trường "questions" là mảng. Mỗi phần tử trong mảng
+                có "id" là ID đầu vào và "options" là mảng gồm đúng bốn chuỗi nội dung khác nhau.
                 Phải có đủ mọi ID trong đầu vào, không thêm lời dẫn hoặc markdown.
 
                 Câu cần sửa:
@@ -998,6 +1000,7 @@ class AIService {
 
         Nếu môn là Toán, số câu, chủ đề, dạng câu và điểm phải theo MA TRẬN TOÁN.
         Với câu trắc nghiệm, thêm "options" là mảng đúng 4 nội dung lựa chọn,
+        cả 4 phải khác nhau, cụ thể, không để trống, không dùng văn bản mẫu/placeholder;
         không tự thêm chữ A./B. vào nội dung; answerKey.answer và
         gradingSpec.correctAnswer dùng duy nhất chữ cái A, B, C hoặc D.
         Dùng answerType=TEXT, gradingMethod=EXACT và
