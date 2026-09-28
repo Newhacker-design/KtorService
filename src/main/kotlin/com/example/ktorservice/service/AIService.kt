@@ -857,15 +857,16 @@ class AIService {
         - Không kiến thức vượt lớp.
         - JSON hợp lệ.
         - Không markdown ngoài JSON.
+        - Viết công thức toán trực tiếp, không bọc công thức bằng dấu phân cách Markdown/LaTeX.
 
         === GRADINGSPEC CHO RULE ENGINE LOCAL ===
         Mỗi câu phải có gradingSpec với method là EXACT, NUMERIC, REQUIRED_CONCEPTS hoặc STEP_RUBRIC.
         - EXACT: dùng cho đáp án ngắn; đưa các biến thể đúng vào acceptedAnswers.
-        - NUMERIC: chỉ dùng khi đáp án trong answerKey là số hoặc phân số thuần, không kèm lời giải.
+        - NUMERIC: chỉ dùng cho phép chấm số đơn giản; với Toán, gradingSpec.mathAnswerSpec mới quyết định định dạng đáp án.
         - REQUIRED_CONCEPTS: dùng cho câu trả lời ngắn có 2-5 ý bắt buộc kiểm tra được.
         - STEP_RUBRIC: chỉ dùng cho bài Toán nhiều bước; rubric.version hiện là 1, criteria phải có id, description, points, method và bằng chứng chấm được. Các method tiêu chí: EVIDENCE (acceptedEvidence), REQUIRED_CONCEPTS (requiredConcepts), FINAL_NUMERIC (expectedNumber, numericTolerance). Tổng points của criteria phải bằng điểm câu.
           Cấu trúc: "rubric":{"version":1,"criteria":[{"id":"method","description":"...","points":1,"method":"REQUIRED_CONCEPTS","requiredConcepts":["..."]},{"id":"work","description":"...","points":1,"method":"EVIDENCE","acceptedEvidence":["..."]},{"id":"final","description":"...","points":1,"method":"FINAL_NUMERIC","expectedNumber":"...","numericTolerance":0}]}. Chỉ sinh tiêu chí có thể nhận diện trong câu trả lời.
-        Nếu môn học là Toán, mọi câu phải có gradingSpec.mathAnswerSpec với kind cụ thể: NUMBER, CALCULATION, FILL_BLANK, MULTIPLE_CHOICE, ORDERED_TUPLE, UNORDERED_SET, QUANTITY hoặc SYMBOLIC_EXPRESSION; không dùng AUTO. FILL_BLANK dùng 1-8 chỗ ___, ..., □ hoặc [ ], correctAnswer chỉ ghi giá trị cần điền (nhiều giá trị theo thứ tự, phân cách bằng dấu chấm phẩy). QUANTITY phải có expectedUnit. Với biểu thức ký hiệu chỉ chấp nhận acceptedAnswers được liệt kê tường minh; không giả định tương đương đại số.
+        Nếu môn học là Toán, mọi câu phải có gradingSpec.mathAnswerSpec với kind cụ thể: NUMBER, CALCULATION, FILL_BLANK, MULTIPLE_CHOICE, ORDERED_TUPLE, UNORDERED_SET, QUANTITY hoặc SYMBOLIC_EXPRESSION; không dùng AUTO. NUMBER: answerKey.answer chỉ là số/phân số, không kèm đơn vị hay lời giải. CALCULATION: dùng khi đáp án chuẩn là biểu thức/phương trình cần tính. FILL_BLANK: chỉ chọn khi question có từ 1 đến 8 placeholder hiển thị nguyên văn bằng ___, □ hoặc [ ]; luôn ưu tiên □ để tránh nhầm dấu câu. Nếu không có placeholder thì không được khai báo FILL_BLANK. Với nhiều chỗ trống, answerKey.answer chỉ ghi các giá trị theo thứ tự, phân cách bằng dấu chấm phẩy. QUANTITY phải có expectedUnit. Với biểu thức ký hiệu chỉ chấp nhận acceptedAnswers được liệt kê tường minh; không giả định tương đương đại số.
         Không dùng gradingSpec cho bài luận mở hoặc ý kiến chủ quan. acceptedAnswers chỉ chứa biến thể đúng.
 
         $previousText
@@ -1121,11 +1122,11 @@ $learningStepContext
         === GRADINGSPEC CHO RULE ENGINE LOCAL ===
         Mỗi câu phải có gradingSpec với method là EXACT, NUMERIC, REQUIRED_CONCEPTS hoặc STEP_RUBRIC.
         - EXACT: dùng cho đáp án ngắn; đưa các biến thể đúng vào acceptedAnswers.
-        - NUMERIC: chỉ dùng khi answerKey.answer là số hoặc phân số thuần, không kèm lời giải.
+        - NUMERIC: chỉ dùng cho phép chấm số đơn giản; với Toán, gradingSpec.mathAnswerSpec mới quyết định định dạng đáp án.
         - REQUIRED_CONCEPTS: dùng cho câu trả lời ngắn có 2-5 ý bắt buộc kiểm tra được.
         - STEP_RUBRIC: chỉ dùng cho bài Toán nhiều bước; rubric.version hiện là 1, criteria phải có id, description, points, method và bằng chứng chấm được. Các method tiêu chí: EVIDENCE (acceptedEvidence), REQUIRED_CONCEPTS (requiredConcepts), FINAL_NUMERIC (expectedNumber, numericTolerance). Tổng points của criteria phải bằng điểm câu.
           Cấu trúc: "rubric":{"version":1,"criteria":[{"id":"method","description":"...","points":1,"method":"REQUIRED_CONCEPTS","requiredConcepts":["..."]},{"id":"work","description":"...","points":1,"method":"EVIDENCE","acceptedEvidence":["..."]},{"id":"final","description":"...","points":1,"method":"FINAL_NUMERIC","expectedNumber":"...","numericTolerance":0}]}. Chỉ sinh tiêu chí có thể nhận diện trong câu trả lời.
-        Nếu môn học là Toán, mọi câu phải có gradingSpec.mathAnswerSpec với kind cụ thể: NUMBER, CALCULATION, FILL_BLANK, MULTIPLE_CHOICE, ORDERED_TUPLE, UNORDERED_SET, QUANTITY hoặc SYMBOLIC_EXPRESSION; không dùng AUTO. FILL_BLANK dùng 1-8 chỗ ___, ..., □ hoặc [ ], correctAnswer chỉ ghi giá trị cần điền (nhiều giá trị theo thứ tự, phân cách bằng dấu chấm phẩy). QUANTITY phải có expectedUnit. Với biểu thức ký hiệu chỉ chấp nhận acceptedAnswers được liệt kê tường minh; không giả định tương đương đại số.
+        Nếu môn học là Toán, mọi câu phải có gradingSpec.mathAnswerSpec với kind cụ thể: NUMBER, CALCULATION, FILL_BLANK, MULTIPLE_CHOICE, ORDERED_TUPLE, UNORDERED_SET, QUANTITY hoặc SYMBOLIC_EXPRESSION; không dùng AUTO. NUMBER: answerKey.answer chỉ là số/phân số, không kèm đơn vị hay lời giải. CALCULATION: dùng khi đáp án chuẩn là biểu thức/phương trình cần tính. FILL_BLANK: chỉ chọn khi question có từ 1 đến 8 placeholder hiển thị nguyên văn bằng ___, □ hoặc [ ]; luôn ưu tiên □ để tránh nhầm dấu câu. Nếu không có placeholder thì không được khai báo FILL_BLANK. Với nhiều chỗ trống, answerKey.answer chỉ ghi các giá trị theo thứ tự, phân cách bằng dấu chấm phẩy. QUANTITY phải có expectedUnit. Với biểu thức ký hiệu chỉ chấp nhận acceptedAnswers được liệt kê tường minh; không giả định tương đương đại số.
         Không dùng gradingSpec cho bài luận mở hoặc ý kiến chủ quan. acceptedAnswers chỉ chứa biến thể đúng.
 
         $previousText
@@ -1510,7 +1511,8 @@ $learningStepContext
 
             connection.requestMethod = "POST"
             connection.connectTimeout = 20_000
-            connection.readTimeout = 180_000
+            // Large assignment prompts can take longer to generate.
+            connection.readTimeout = 240_000
             connection.doOutput = true
 
             connection.setRequestProperty(
@@ -1702,6 +1704,38 @@ $learningStepContext
 // PARSE GEMINI RESPONSE
 // ============================================================
 
+    private fun stripMathDelimiters(text: String): String {
+        val output = StringBuilder(text.length)
+        var index = 0
+        while (index < text.length) {
+            if (text[index].code != 36 || (index > 0 && text[index - 1] == '\\')) {
+                output.append(text[index++])
+                continue
+            }
+
+            val delimiterLength = if (index + 1 < text.length && text[index + 1].code == 36) 2 else 1
+            var closingIndex = index + delimiterLength
+            while (closingIndex < text.length) {
+                if (text[closingIndex].code == 36 &&
+                    (closingIndex == 0 || text[closingIndex - 1] != '\\')
+                ) {
+                    val closingLength =
+                        if (closingIndex + 1 < text.length && text[closingIndex + 1].code == 36) 2 else 1
+                    if (closingLength == delimiterLength) break
+                }
+                closingIndex++
+            }
+
+            if (closingIndex < text.length) {
+                output.append(text, index + delimiterLength, closingIndex)
+                index = closingIndex + delimiterLength
+            } else {
+                output.append(text[index++])
+            }
+        }
+        return output.toString()
+    }
+
     private fun parseResponse(
         responseText: String
     ): GeneratedAssignment {
@@ -1748,6 +1782,7 @@ $learningStepContext
                     ?.jsonPrimitive
                     ?.contentOrNull
                     ?.trim()
+                    ?.let(::stripMathDelimiters)
                     ?: throw IllegalStateException(
                         "Question $id missing question"
                     )
@@ -1910,10 +1945,30 @@ $learningStepContext
                 ?: throw IllegalStateException(
                     "Missing answer key for question ${question.id}"
                 )
-            question.copy(
-                gradingSpec = question.gradingSpec.copy(
-                    correctAnswer = correctAnswer
+            val gradingSpec = question.gradingSpec.copy(correctAnswer = correctAnswer)
+            val mathSpec = gradingSpec.mathAnswerSpec
+            val blankCount = Regex("_{2,}|\\.{2,}|…+|□|▢|\\[\\s*\\]")
+                .findAll(question.question)
+                .count()
+
+            // If the model labels a scalar-answer question as FILL_BLANK but
+            // omitted a visible blank token, NUMBER is the safe local format.
+            val normalizedMathSpec = if (
+                mathSpec != null &&
+                mathSpec.kind == MathAnswerKind.FILL_BLANK &&
+                blankCount == 0 &&
+                (listOf(correctAnswer) + gradingSpec.acceptedAnswers).all(::isNumericAnswer)
+            ) {
+                println(
+                    "[AIService] Question ${question.id}: normalized FILL_BLANK to NUMBER because no visible blank token was generated"
                 )
+                mathSpec.copy(kind = MathAnswerKind.NUMBER)
+            } else {
+                mathSpec
+            }
+
+            question.copy(
+                gradingSpec = gradingSpec.copy(mathAnswerSpec = normalizedMathSpec)
             )
         }
 
@@ -1949,10 +2004,65 @@ $learningStepContext
                 ?.contentOrNull
 
         val raw = candidateText ?: responseText
+        val cleaned = cleanJsonText(raw)
+        val validEscapes = escapeInvalidJsonBackslashes(cleaned)
+        if (validEscapes != cleaned) {
+            println("[AIService] Repaired invalid backslash escapes in Gemini JSON text")
+        }
+        return json.parseToJsonElement(validEscapes)
+    }
 
-        return json.parseToJsonElement(
-            cleanJsonText(raw)
-        )
+    /** Gemini occasionally emits LaTeX-like text such as `\log` inside a JSON
+     * string without escaping the backslash. Escape only sequences that are
+     * invalid in JSON; preserve valid escapes such as `\n` and `\u00e9`. */
+    private fun escapeInvalidJsonBackslashes(text: String): String {
+        val output = StringBuilder(text.length)
+        var insideString = false
+        var index = 0
+
+        while (index < text.length) {
+            val char = text[index]
+            if (!insideString) {
+                output.append(char)
+                if (char == '"') insideString = true
+                index++
+                continue
+            }
+
+            when (char) {
+                '"' -> {
+                    output.append(char)
+                    insideString = false
+                    index++
+                }
+                '\\' -> {
+                    if (index + 1 >= text.length) {
+                        output.append("\\\\")
+                        index++
+                        continue
+                    }
+
+                    val next = text[index + 1]
+                    val validSimpleEscape = next in "\"\\/bfnrt"
+                    val validUnicodeEscape = next == 'u' && index + 5 < text.length &&
+                            text.substring(index + 2, index + 6).all { hex ->
+                                hex in '0'..'9' || hex in 'a'..'f' || hex in 'A'..'F'
+                            }
+                    if (validSimpleEscape || validUnicodeEscape) {
+                        output.append(char).append(next)
+                        index += 2
+                    } else {
+                        output.append("\\\\")
+                        index++
+                    }
+                }
+                else -> {
+                    output.append(char)
+                    index++
+                }
+            }
+        }
+        return output.toString()
     }
 
     private fun cleanJsonText(
@@ -2110,6 +2220,7 @@ $learningStepContext
                 errors += "Question ${question.id} requires at least one grading concept"
             }
             if (
+                !isMathSubject &&
                 spec.method == RuleGradingMethod.NUMERIC &&
                 !isNumericAnswer(spec.correctAnswer)
             ) {
@@ -2180,11 +2291,17 @@ $learningStepContext
                     if (mathSpec.kind == MathAnswerKind.QUANTITY && mathSpec.expectedUnit.isNullOrBlank()) {
                         errors += "Math question ${question.id} uses QUANTITY without expectedUnit"
                     }
+                    if (mathSpec.kind == MathAnswerKind.NUMBER) {
+                        val invalidAnswers = listOf(spec.correctAnswer) + spec.acceptedAnswers
+                        if (invalidAnswers.any { !isNumericAnswer(it) }) {
+                            errors += "Math question ${question.id} uses NUMBER but correctAnswer/acceptedAnswers must contain only numbers or fractions"
+                        }
+                    }
                     if (mathSpec.kind == MathAnswerKind.FILL_BLANK) {
                         val blankCount = Regex("_{2,}|\\.{2,}|…+|□|▢|\\[\\s*\\]")
                             .findAll(question.question).count()
                         if (blankCount !in 1..8) {
-                            errors += "Math fill-blank question has an unsupported blank count"
+                            errors += "Math question ${question.id} declares FILL_BLANK but contains $blankCount supported placeholders; include 1-8 visible ___, □, or [ ] placeholders, or change mathAnswerSpec.kind to NUMBER/CALCULATION"
                         }
                     }
                 }
