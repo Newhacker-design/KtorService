@@ -13,6 +13,8 @@ import com.example.ktorservice.database.table.LocationTable
 import com.example.ktorservice.database.table.ParentChildrenTable
 import com.example.ktorservice.database.table.StudentLearningProgressTable
 import com.example.ktorservice.database.table.UserAssignmentsTable
+import com.example.ktorservice.database.table.RaceTopSessionsTable
+import com.example.ktorservice.database.table.RaceTopSessionAssignmentsTable
 import com.example.ktorservice.database.table.ViewedItems
 import com.example.ktorservice.service.DefaultMathLearningPathSeeder
 import com.zaxxer.hikari.HikariConfig
@@ -105,6 +107,8 @@ object DatabaseFactory {
                 SessionsTable,
                 AssignmentsTable,
                 UserAssignmentsTable,
+                RaceTopSessionsTable,
+                RaceTopSessionAssignmentsTable,
                 LearningPathsTable,
                 LearningStepsTable,
                 StudentLearningProgressTable,
@@ -124,6 +128,9 @@ object DatabaseFactory {
                 "ALTER TABLE user_assignments " +
                         "ADD COLUMN IF NOT EXISTS mode VARCHAR(20) NOT NULL DEFAULT 'PRACTICE'"
             )
+            exec("ALTER TABLE race_top_sessions ADD COLUMN IF NOT EXISTS weak_subjects TEXT NULL")
+            exec("ALTER TABLE race_top_sessions ADD COLUMN IF NOT EXISTS average_subjects TEXT NULL")
+            exec("ALTER TABLE race_top_sessions ADD COLUMN IF NOT EXISTS strong_subjects TEXT NULL")
             // One student may take the same stored assignment in both modes.
             exec("DROP INDEX IF EXISTS uq_user_assignment")
             exec(

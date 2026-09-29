@@ -11,6 +11,8 @@ import com.example.ktorservice.model.AssignmentStudentData
 import com.example.ktorservice.model.AssignmentSubmitRequest
 import com.example.ktorservice.model.TopStudentResponse
 import com.example.ktorservice.model.TopStudentsResponse
+import com.example.ktorservice.model.RaceTopStartResponse
+import com.example.ktorservice.model.RaceTopSubjectResult
 import com.example.ktorservice.model.UserAssignmentResponse
 import com.example.ktorservice.security.requireUserId
 import com.example.ktorservice.service.AIService
@@ -29,6 +31,61 @@ fun Route.assignmentRoutes(
     assignmentService: AssignmentService,
     parentChildService: ParentChildService
 ) {
+    post("/assignments/race-top") {
+        try {
+            val parentId = call.requireUserId(authService)
+            if (parentId == null) {
+                call.respond(HttpStatusCode.Unauthorized, RaceTopStartResponse(false, message = "Invalid or expired token"))
+                return@post
+            }
+            val role = authService.getUserRole(parentId)?.uppercase()
+            val isStudentStartingOwnSet = role == ParentChildService.ROLE_CHILD
+            if (role != ParentChildService.ROLE_PARENT && role != ParentChildService.ROLE_ADMIN && !isStudentStartingOwnSet) {
+                call.respond(HttpStatusCode.Forbidden, RaceTopStartResponse(false, message = "Only the student or their parent can start this set"))
+                return@post
+            }
+            val childId = call.request.queryParameters["childUserId"]?.toIntOrNull()
+            val grade = call.request.queryParameters["grade"]?.toIntOrNull()
+            if (childId == null || grade == null || grade !in 1..12) {
+                call.respond(HttpStatusCode.BadRequest, RaceTopStartResponse(false, message = "Valid childUserId and grade are required"))
+                return@post
+            }
+            if (role == ParentChildService.ROLE_CHILD && childId != parentId) {
+                call.respond(HttpStatusCode.Forbidden, RaceTopStartResponse(false, message = "A student can only start their own set"))
+                return@post
+            }
+            if (role == ParentChildService.ROLE_PARENT && !parentChildService.isChildOfParent(parentId, childId)) {
+                call.respond(HttpStatusCode.Forbidden, RaceTopStartResponse(false, message = "Child account does not belong to this parent"))
+                return@post
+            }
+            val set = assignmentService.createRaceTopSet(childId, grade)
+            runCatching { ControlWebSocketHub.notifyAssignmentsChanged(childId) }
+            call.respond(HttpStatusCode.OK, RaceTopStartResponse(
+                success = true,
+                sessionId = set.sessionId,
+                assignments = set.assignments.map { item -> RaceTopSubjectResult(
+                    subject = item.assignment.subject,
+                    userAssignmentId = item.id,
+                    status = item.status,
+                    score = item.score,
+                    possibleScore = item.assignment.totalScore
+                ) },
+                complete = set.complete,
+                weakSubjects = set.weakSubjects,
+                averageSubjects = set.averageSubjects,
+                strongSubjects = set.strongSubjects,
+                previousWeakSubjects = set.previousWeakSubjects,
+                previousAverageSubjects = set.previousAverageSubjects,
+                previousStrongSubjects = set.previousStrongSubjects,
+                message = if (set.complete) "Round complete" else "All subjects in this round have been assigned"
+            ))
+        } catch (e: IllegalArgumentException) {
+            call.respond(HttpStatusCode.BadRequest, RaceTopStartResponse(false, message = e.message))
+        } catch (e: Exception) {
+            e.printStackTrace()
+            call.respond(HttpStatusCode.InternalServerError, RaceTopStartResponse(false, message = e.message ?: "Could not create race-top set"))
+        }
+    }
 // ============================================================
 // GET /assignments/top-students
 //
@@ -312,6 +369,17 @@ fun Route.assignmentRoutes(
                     UserAssignmentResponse(
                         success = false,
                         message = "Invalid mode. Use PRACTICE or RACE_TOP"
+                    )
+                )
+                return@get
+            }
+
+            if (mode == AssignmentMode.RACE_TOP) {
+                call.respond(
+                    HttpStatusCode.Conflict,
+                    UserAssignmentResponse(
+                        success = false,
+                        message = "Start Đua Top through the all-subject race-top set button"
                     )
                 )
                 return@get

@@ -3,6 +3,8 @@ package com.example.ktorservice.service
 import com.example.ktorservice.database.UsersTable
 import com.example.ktorservice.database.table.AssignmentsTable
 import com.example.ktorservice.database.table.UserAssignmentsTable
+import com.example.ktorservice.database.table.RaceTopSessionsTable
+import com.example.ktorservice.database.table.RaceTopSessionAssignmentsTable
 import com.example.ktorservice.model.AssignmentMode
 import com.example.ktorservice.model.QuestionMetadata
 import kotlinx.coroutines.Dispatchers
@@ -15,6 +17,9 @@ import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.transactions.transaction
 
 import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import java.util.concurrent.ConcurrentHashMap
 
 private const val MAX_ASSIGNMENT_GENERATION_ATTEMPTS = 5
 
@@ -32,6 +37,115 @@ class AssignmentService(
     // ============================================================
 
     private val aiSemaphore = Semaphore(2)
+    private val raceLocks = ConcurrentHashMap<Int, Mutex>()
+
+    data class RaceTopSetResult(
+        val sessionId: Int,
+        val assignments: List<UserAssignmentResult>,
+        val complete: Boolean,
+        val weakSubjects: List<String>,
+        val averageSubjects: List<String>,
+        val strongSubjects: List<String>,
+        val previousWeakSubjects: List<String>,
+        val previousAverageSubjects: List<String>,
+        val previousStrongSubjects: List<String>
+    )
+
+    /** Creates/resumes one all-subject set. Stored assignments are reused by getNextAssignment. */
+    suspend fun createRaceTopSet(userId: Int, grade: Int): RaceTopSetResult =
+        raceLocks.computeIfAbsent(userId) { Mutex() }.withLock {
+            require(grade in 1..12) { "Invalid grade" }
+            val subjects = listOf("math", "literature", "english", "physics", "chemistry", "biology", "giao_duc_gioi_tinh")
+            val previousGroups = withContext(Dispatchers.IO) {
+                transaction {
+                    val latest = RaceTopSessionsTable.selectAll().where {
+                        (RaceTopSessionsTable.userId eq userId) and (RaceTopSessionsTable.status eq "COMPLETED")
+                    }.orderBy(RaceTopSessionsTable.id to SortOrder.DESC).firstOrNull()
+                    latest?.let { row -> listOf(
+                        row[RaceTopSessionsTable.weakSubjects].orEmpty().split('|').filter(String::isNotBlank),
+                        row[RaceTopSessionsTable.averageSubjects].orEmpty().split('|').filter(String::isNotBlank),
+                        row[RaceTopSessionsTable.strongSubjects].orEmpty().split('|').filter(String::isNotBlank)
+                    ) }
+                }
+            }
+            var sessionId = withContext(Dispatchers.IO) {
+                transaction {
+                    val active = RaceTopSessionsTable.selectAll().where {
+                        (RaceTopSessionsTable.userId eq userId) and
+                            (RaceTopSessionsTable.status eq "ACTIVE")
+                    }.orderBy(RaceTopSessionsTable.id to SortOrder.DESC).firstOrNull()
+                    if (active != null) {
+                        // Return a completed round once so its score groups can be shown.
+                        // The next button press will create the following round.
+                        active[RaceTopSessionsTable.id]
+                    } else null
+                }
+            }
+            if (sessionId == null) {
+                sessionId = withContext(Dispatchers.IO) {
+                    transaction {
+                        RaceTopSessionsTable.insert {
+                            it[RaceTopSessionsTable.userId] = userId
+                            it[RaceTopSessionsTable.grade] = grade
+                            it[status] = "ACTIVE"
+                            it[createdAt] = System.currentTimeMillis()
+                        }[RaceTopSessionsTable.id]
+                    }
+                }
+            }
+            val existingSubjects = withContext(Dispatchers.IO) {
+                transaction {
+                    RaceTopSessionAssignmentsTable.selectAll().where {
+                        RaceTopSessionAssignmentsTable.sessionId eq sessionId!!
+                    }.map { it[RaceTopSessionAssignmentsTable.subject] }.toSet()
+                }
+            }
+            for (subject in subjects.filterNot { it in existingSubjects }) {
+                val assignment = getNextAssignment(
+                    userId = userId, grade = grade, subject = subject, topic = null,
+                    difficulty = AIService.Difficulty.MEDIUM, mode = AssignmentMode.RACE_TOP
+                )
+                withContext(Dispatchers.IO) {
+                    transaction {
+                        RaceTopSessionAssignmentsTable.insert {
+                            it[RaceTopSessionAssignmentsTable.sessionId] = sessionId!!
+                            it[userAssignmentId] = assignment.id
+                            it[RaceTopSessionAssignmentsTable.subject] = subject
+                        }
+                    }
+                }
+            }
+            val results = getUserAssignments(userId)
+            val linkedIds = withContext(Dispatchers.IO) {
+                transaction {
+                    RaceTopSessionAssignmentsTable.selectAll().where {
+                        RaceTopSessionAssignmentsTable.sessionId eq sessionId!!
+                    }.map { it[RaceTopSessionAssignmentsTable.userAssignmentId] }.toSet()
+                }
+            }
+            val assignments = results.filter { it.id in linkedIds }
+            val complete = assignments.size == subjects.size && assignments.all { it.status == "COMPLETED" }
+            if (complete) withContext(Dispatchers.IO) {
+                transaction {
+                    RaceTopSessionsTable.update({ RaceTopSessionsTable.id eq sessionId!! }) { it[status] = "COMPLETED" }
+                }
+            }
+            val grouped = assignments.mapNotNull { item ->
+                val total = item.assignment.totalScore
+                val score = item.score
+                if (item.status != "COMPLETED" || score == null || total <= 0.0) null
+                else item.assignment.subject to (score / total * 100.0)
+            }
+            RaceTopSetResult(
+                sessionId!!, assignments, complete,
+                grouped.filter { it.second < 60.0 }.map { it.first },
+                grouped.filter { it.second >= 60.0 && it.second < 80.0 }.map { it.first },
+                grouped.filter { it.second >= 80.0 }.map { it.first },
+                previousGroups?.getOrNull(0).orEmpty(),
+                previousGroups?.getOrNull(1).orEmpty(),
+                previousGroups?.getOrNull(2).orEmpty()
+            )
+        }
 
 
 
@@ -1420,6 +1534,8 @@ class AssignmentService(
             }
         }
 
+        updateRaceTopRoundIfComplete(userAssignmentId)
+
 // ========================================================
 // UPDATE LEARNING PATH PROGRESS
 // ========================================================
@@ -1968,6 +2084,41 @@ class AssignmentService(
         val mode: AssignmentMode = AssignmentMode.PRACTICE
     )
 
+
+    private fun updateRaceTopRoundIfComplete(userAssignmentId: Int) {
+        transaction {
+            val sessionIds = RaceTopSessionAssignmentsTable.selectAll().where {
+                RaceTopSessionAssignmentsTable.userAssignmentId eq userAssignmentId
+            }.map { it[RaceTopSessionAssignmentsTable.sessionId] }.distinct()
+            sessionIds.forEach { sessionId ->
+                val links = RaceTopSessionAssignmentsTable.selectAll().where {
+                    RaceTopSessionAssignmentsTable.sessionId eq sessionId
+                }.toList()
+                if (links.size != 7) return@forEach
+                val results = links.mapNotNull { link ->
+                    val userRow = UserAssignmentsTable.selectAll().where {
+                        UserAssignmentsTable.id eq link[RaceTopSessionAssignmentsTable.userAssignmentId]
+                    }.firstOrNull() ?: return@mapNotNull null
+                    if (userRow[UserAssignmentsTable.status] != "COMPLETED") return@mapNotNull null
+                    val assignmentRow = AssignmentsTable.selectAll().where {
+                        AssignmentsTable.id eq userRow[UserAssignmentsTable.assignmentId]
+                    }.firstOrNull() ?: return@mapNotNull null
+                    val score = userRow[UserAssignmentsTable.score] ?: return@mapNotNull null
+                    val total = assignmentRow[AssignmentsTable.totalScore]
+                    if (total <= 0.0) return@mapNotNull null
+                    Triple(link[RaceTopSessionAssignmentsTable.subject], score / total * 100.0, total)
+                }
+                if (results.size == 7) {
+                    RaceTopSessionsTable.update({ RaceTopSessionsTable.id eq sessionId }) {
+                        it[RaceTopSessionsTable.status] = "COMPLETED"
+                        it[RaceTopSessionsTable.weakSubjects] = results.filter { row -> row.second < 60.0 }.joinToString("|") { row -> row.first }
+                        it[RaceTopSessionsTable.averageSubjects] = results.filter { row -> row.second >= 60.0 && row.second < 80.0 }.joinToString("|") { row -> row.first }
+                        it[RaceTopSessionsTable.strongSubjects] = results.filter { row -> row.second >= 80.0 }.joinToString("|") { row -> row.first }
+                    }
+                }
+            }
+        }
+    }
 
     // ============================================================
     // GET ALL USER ASSIGNMENTS

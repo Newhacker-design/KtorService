@@ -176,3 +176,27 @@ data class TopStudentsResponse(
     val message: String? = null
 )
 
+@Serializable
+data class RaceTopSubjectResult(
+    val subject: String,
+    val userAssignmentId: Int,
+    val status: String,
+    val score: Double? = null,
+    val possibleScore: Double
+)
+
+@Serializable
+data class RaceTopStartResponse(
+    val success: Boolean,
+    val sessionId: Int? = null,
+    val assignments: List<RaceTopSubjectResult> = emptyList(),
+    val complete: Boolean = false,
+    val weakSubjects: List<String> = emptyList(),
+    val averageSubjects: List<String> = emptyList(),
+    val strongSubjects: List<String> = emptyList(),
+    val previousWeakSubjects: List<String> = emptyList(),
+    val previousAverageSubjects: List<String> = emptyList(),
+    val previousStrongSubjects: List<String> = emptyList(),
+    val message: String? = null
+)
+
