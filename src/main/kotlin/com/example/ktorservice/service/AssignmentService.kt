@@ -586,8 +586,12 @@ class AssignmentService(
 
             if (
                 activeAssignment != null &&
-                (!LocalSubjectAssignmentGenerator.supports(subject) ||
-                        isLocallyGradable(activeAssignment.assignment))
+                (if (mode == AssignmentMode.RACE_TOP) {
+                    activeAssignment.assignment.raceTopPool
+                } else {
+                    !LocalSubjectAssignmentGenerator.supports(subject) ||
+                            isLocallyGradable(activeAssignment.assignment)
+                })
             ) {
                 println(
                     "REUSING ACTIVE ASSIGNMENT FOR LEARNING STEP: " +
@@ -609,6 +613,30 @@ class AssignmentService(
                     mode = mode
                 )
             }
+
+            // Race Top must use a pool item that has not already been assigned
+            // to this student. If none remains, generate and persist a fresh AI
+            // item for the current step instead of falling back to local banks
+            // or recycling a completed assignment.
+            val generatedPoolItem = generateRaceTopPoolAssignment(grade, learningStepId)
+            val generatedAssignment = withContext(Dispatchers.IO) {
+                transaction {
+                    AssignmentsTable.selectAll()
+                        .where { AssignmentsTable.id eq generatedPoolItem.assignmentId }
+                        .single()
+                        .let(::rowToResult)
+                }
+            }
+            println(
+                "RACE TOP POOL EMPTY OR EXHAUSTED; CREATED AI ASSIGNMENT: " +
+                        "assignment=${generatedAssignment.id} step=$learningStepId"
+            )
+            return createUserAssignmentImmediately(
+                userId = userId,
+                assignment = generatedAssignment,
+                learningStepId = learningStepId,
+                mode = mode
+            )
         }
 
         val existingAssignment =
@@ -1391,12 +1419,7 @@ class AssignmentService(
             }.orderBy(UserAssignmentsTable.id to SortOrder.DESC).toList()
             val usedIds = attempts.map { it[UserAssignmentsTable.assignmentId] }.toSet()
             val nextUnused = pool.firstOrNull { it[AssignmentsTable.id] !in usedIds }
-            val chosen = nextUnused ?: run {
-                val lastAssignmentId = attempts.firstOrNull()?.get(UserAssignmentsTable.assignmentId)
-                val lastIndex = pool.indexOfFirst { it[AssignmentsTable.id] == lastAssignmentId }
-                pool[(lastIndex + 1).mod(pool.size)]
-            }
-            rowToResult(chosen)
+            nextUnused?.let(::rowToResult)
         }
     }
 
