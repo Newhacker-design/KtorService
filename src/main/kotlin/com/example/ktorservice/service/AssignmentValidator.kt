@@ -77,9 +77,27 @@ object AssignmentValidator {
     ): ValidationResult {
 
         val errors = mutableListOf<String>()
-        val isMath = subject?.trim()?.lowercase() in setOf("math", "mathematics", "toán", "toan")
+        val normalizedSubject = subject?.trim()?.lowercase()
+            ?.replace("-", " ")
+            ?.replace("_", " ")
+            ?.replace(Regex("\\s+"), " ")
+        val isMath = normalizedSubject in setOf("math", "mathematics", "toán", "toan")
+        val isSexEducation = normalizedSubject in setOf(
+            "giao duc gioi tinh",
+            "giao duc suc khoe sinh san",
+            "suc khoe sinh san",
+            "gioi tinh",
+            "giáo dục giới tính",
+            "giáo dục sức khỏe giới tính",
+            "sex education",
+            "sexual health",
+            "reproductive health",
+            "sexual education"
+        )
         val usesSubjectMatrix = subject?.let { LocalSubjectAssignmentGenerator.supports(it) } == true
-        val expectedQuestionCount = if (isMath || usesSubjectMatrix) {
+        val expectedQuestionCount = if (isSexEducation) {
+            3
+        } else if (isMath || usesSubjectMatrix) {
             when (grade ?: -1) {
                 in 1..5 -> 10
                 in 6..9 -> 16
