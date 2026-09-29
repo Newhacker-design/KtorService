@@ -16,6 +16,7 @@ import com.example.ktorservice.security.requireUserId
 import com.example.ktorservice.service.AIService
 import com.example.ktorservice.service.AssignmentService
 import com.example.ktorservice.service.AuthService
+import com.example.ktorservice.service.ControlWebSocketHub
 import com.example.ktorservice.service.ParentChildService
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.request.receive
@@ -1428,6 +1429,12 @@ fun Route.assignmentRoutes(
                 )
 
                 return@post
+            }
+
+            try {
+                ControlWebSocketHub.notifyAssignmentsChanged(userId)
+            } catch (e: Exception) {
+                println("Failed to notify Receiver about assignment update for user $userId: ${e.message}")
             }
 
             call.respond(

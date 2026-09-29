@@ -19,6 +19,11 @@ data class VideoChangedEvent(
     val version: Long
 )
 
+@Serializable
+data class AssignmentsChangedEvent(
+    val type: String = "ASSIGNMENTS_CHANGED"
+)
+
 object ControlWebSocketHub {
 
     private val sessions =
@@ -114,6 +119,18 @@ object ControlWebSocketHub {
             childUserId = childUserId,
             set = set,
             message = message
+        )
+    }
+
+    /** Notify the Receiver that assignment data changed and should be rechecked. */
+    suspend fun notifyAssignmentsChanged(
+        childUserId: Int
+    ) {
+        val set = sessions[childUserId] ?: return
+        sendToSessions(
+            childUserId = childUserId,
+            set = set,
+            message = json.encodeToString(AssignmentsChangedEvent())
         )
     }
 
