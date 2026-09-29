@@ -127,7 +127,10 @@ object AssignmentValidator {
             validateQuestion(
                 question = question,
                 errors = errors,
-                isMath = isMath
+                // Curated subject-bank wording can naturally repeat key terms
+                // (e.g. names of substances). Keep malformed-phrase checks,
+                // but don't reject the bank on the adjacent-word heuristic.
+                ignoreRepeatedWords = isMath || usesSubjectMatrix
             )
         }
 
@@ -298,7 +301,7 @@ object AssignmentValidator {
     private fun validateQuestion(
         question: AIService.GeneratedQuestion,
         errors: MutableList<String>,
-        isMath: Boolean
+        ignoreRepeatedWords: Boolean
     ) {
 
         val id = question.id
@@ -426,7 +429,7 @@ object AssignmentValidator {
             fieldName = "Question $id",
             errors = errors,
             checkQuestionStructure = true,
-            ignoreRepeatedWords = isMath
+            ignoreRepeatedWords = ignoreRepeatedWords
         )
 
         // -----------------------------------------------------
