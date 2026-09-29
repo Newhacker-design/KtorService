@@ -223,6 +223,24 @@ data class RaceTopPoolGenerateRequest(
 )
 
 @Serializable
+data class RaceTopPoolEnsureStepRequest(val grade: Int, val stepOrder: Int)
+
+@Serializable
+data class RaceTopPoolStepChoiceResponse(
+    val subject: String,
+    val learningStepId: Int,
+    val stepOrder: Int,
+    val title: String
+)
+
+@Serializable
+data class RaceTopPoolEnsureStepResponse(
+    val success: Boolean,
+    val steps: List<RaceTopPoolStepChoiceResponse> = emptyList(),
+    val message: String? = null
+)
+
+@Serializable
 data class RaceTopPoolGenerateResponse(
     val success: Boolean,
     val assignmentId: Int? = null,

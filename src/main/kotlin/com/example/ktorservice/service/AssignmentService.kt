@@ -222,6 +222,9 @@ class AssignmentService(
         return RaceTopPoolAssignmentResult(id, grade, subject, learningStepId, stepOrder, final.title)
     }
 
+    fun ensureRaceTopPoolStep(grade: Int, stepOrder: Int): List<LearningPathService.RaceTopStepChoice> =
+        learningPathService.ensureRaceTopStep(grade, stepOrder)
+
     private fun assignmentSimilarity(first: String, second: String): Double {
         fun tokens(value: String): Set<String> = value
             .substringAfter("=== CÂU HỎI ===", value)

@@ -16,6 +16,9 @@ import com.example.ktorservice.model.RaceTopSubjectResult
 import com.example.ktorservice.model.AssignmentCompletionStatusResponse
 import com.example.ktorservice.model.RaceTopPoolGenerateRequest
 import com.example.ktorservice.model.RaceTopPoolGenerateResponse
+import com.example.ktorservice.model.RaceTopPoolEnsureStepRequest
+import com.example.ktorservice.model.RaceTopPoolEnsureStepResponse
+import com.example.ktorservice.model.RaceTopPoolStepChoiceResponse
 import com.example.ktorservice.model.UserAssignmentResponse
 import com.example.ktorservice.security.requireUserId
 import com.example.ktorservice.service.AIService
@@ -34,6 +37,31 @@ fun Route.assignmentRoutes(
     assignmentService: AssignmentService,
     parentChildService: ParentChildService
 ) {
+    post("/admin/race-top-pool/ensure-step") {
+        val userId = call.requireUserId(authService)
+        if (userId == null) {
+            call.respond(HttpStatusCode.Unauthorized, RaceTopPoolEnsureStepResponse(false, message = "Authentication required"))
+            return@post
+        }
+        if (authService.getUserRole(userId)?.uppercase() != ParentChildService.ROLE_ADMIN) {
+            call.respond(HttpStatusCode.Forbidden, RaceTopPoolEnsureStepResponse(false, message = "Only ADMIN can prepare race-top steps"))
+            return@post
+        }
+        try {
+            val request = call.receive<RaceTopPoolEnsureStepRequest>()
+            val steps = assignmentService.ensureRaceTopPoolStep(request.grade, request.stepOrder)
+            call.respond(HttpStatusCode.OK, RaceTopPoolEnsureStepResponse(
+                success = true,
+                steps = steps.map { RaceTopPoolStepChoiceResponse(it.subject, it.step.id, it.step.stepOrder, it.step.title) }
+            ))
+        } catch (e: IllegalArgumentException) {
+            call.respond(HttpStatusCode.BadRequest, RaceTopPoolEnsureStepResponse(false, message = e.message))
+        } catch (e: Exception) {
+            e.printStackTrace()
+            call.respond(HttpStatusCode.InternalServerError, RaceTopPoolEnsureStepResponse(false, message = e.message ?: "Could not prepare synchronized step"))
+        }
+    }
+
     post("/admin/race-top-pool/generate") {
         val userId = call.requireUserId(authService)
         if (userId == null) {

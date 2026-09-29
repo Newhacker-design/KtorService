@@ -11,6 +11,52 @@ import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.transactions.transaction
 
 class LearningPathService {
+    data class RaceTopStepChoice(val subject: String, val step: LearningStep)
+
+    /** Creates missing paths and synchronized step rows so an admin can seed the first race-top set. */
+    fun ensureRaceTopStep(grade: Int, stepOrder: Int): List<RaceTopStepChoice> = transaction {
+        require(grade in 1..12) { "Invalid grade" }
+        require(stepOrder in 1..50) { "Step order must be between 1 and 50" }
+        val subjects = listOf("MATH", "LITERATURE", "ENGLISH", "PHYSICS", "CHEMISTRY", "BIOLOGY", "GIAO_DUC_GIOI_TINH")
+        val labels = mapOf(
+            "MATH" to "Toán", "LITERATURE" to "Ngữ văn", "ENGLISH" to "Tiếng Anh",
+            "PHYSICS" to "Vật lý", "CHEMISTRY" to "Hóa học", "BIOLOGY" to "Sinh học",
+            "GIAO_DUC_GIOI_TINH" to "Giáo dục giới tính"
+        )
+        subjects.map { subject ->
+            val path = LearningPathsTable.selectAll().where { LearningPathsTable.grade eq grade }
+                .firstOrNull { it[LearningPathsTable.subject].trim().equals(subject, ignoreCase = true) }
+            val pathId = path?.get(LearningPathsTable.id) ?: LearningPathsTable.insert {
+                it[LearningPathsTable.grade] = grade
+                it[LearningPathsTable.subject] = subject
+                it[LearningPathsTable.name] = "Lộ trình ${labels.getValue(subject)} lớp $grade"
+                it[LearningPathsTable.description] = "Lộ trình Đua Top đồng bộ level cho lớp $grade."
+                it[LearningPathsTable.createdAt] = System.currentTimeMillis()
+            }[LearningPathsTable.id]
+            var existing = LearningStepsTable.selectAll().where { LearningStepsTable.pathId eq pathId }
+                .associateBy { it[LearningStepsTable.stepOrder] }
+            for (order in 1..stepOrder) {
+                if (order !in existing) {
+                    val previousStepId = existing[order - 1]?.get(LearningStepsTable.id)
+                    val subjectLabel = labels.getValue(subject)
+                    val stepId = LearningStepsTable.insert {
+                        it[LearningStepsTable.pathId] = pathId
+                        it[LearningStepsTable.stepOrder] = order
+                        it[LearningStepsTable.title] = "$subjectLabel • Level $order • Lớp $grade"
+                        it[LearningStepsTable.skill] = "Kiến thức và kỹ năng cốt lõi môn $subjectLabel lớp $grade, mức độ level $order"
+                        it[LearningStepsTable.description] = "Tạo nội dung phù hợp lứa tuổi theo chương trình lớp $grade; tập trung kiến thức nền tảng môn $subjectLabel. Level $order có độ thử thách cao hơn level trước."
+                        it[LearningStepsTable.prerequisiteStepId] = previousStepId
+                        it[LearningStepsTable.createdAt] = System.currentTimeMillis()
+                    }[LearningStepsTable.id]
+                    existing = existing + (order to LearningStepsTable.selectAll().where {
+                        LearningStepsTable.id eq stepId
+                    }.single())
+                }
+            }
+            RaceTopStepChoice(subject, existing.getValue(stepOrder).toLearningStep())
+        }
+    }
+
     data class RaceTopLevelStatus(val level: Int, val masteredSubjects: Int, val totalSubjects: Int) {
         val scoreCoefficient: Double get() = 1.0 + (level - 1) * 0.1
     }
