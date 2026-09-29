@@ -10,6 +10,7 @@ import com.example.ktorservice.database.table.RaceTopSessionAssignmentsTable
 import com.example.ktorservice.model.AssignmentMode
 import com.example.ktorservice.model.QuestionMetadata
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 
@@ -125,18 +126,33 @@ class AssignmentService(
         var lastErrors = emptyList<String>()
         var accepted: AIService.GeneratedAssignment? = null
         for (attempt in 1..MAX_ASSIGNMENT_GENERATION_ATTEMPTS) {
-            val candidate = aiSemaphore.withPermit {
-                aiService.generateAssignment(
-                    grade = grade,
-                    subject = subject,
-                    topic = null,
-                    difficulty = AIService.Difficulty.MEDIUM,
-                    previousAssignments = previous + listOfNotNull(accepted?.let(::buildAssignmentContent)),
-                    qualityFeedback = lastErrors.joinToString("\n").ifBlank { null },
-                    learningStepTitle = stepTitle,
-                    learningStepSkill = stepSkill,
-                    learningStepDescription = stepDescription
-                )
+            val candidate = try {
+                aiSemaphore.withPermit {
+                    aiService.generateAssignment(
+                        grade = grade,
+                        subject = subject,
+                        topic = null,
+                        difficulty = AIService.Difficulty.MEDIUM,
+                        previousAssignments = previous + listOfNotNull(accepted?.let(::buildAssignmentContent)),
+                        qualityFeedback = lastErrors.joinToString("\n").ifBlank { null },
+                        learningStepTitle = stepTitle,
+                        learningStepSkill = stepSkill,
+                        learningStepDescription = stepDescription
+                    )
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                val detail = error.message?.take(600) ?: error.javaClass.simpleName
+                lastErrors = listOf("Lần $attempt: Gemini không trả được đề hợp lệ: $detail")
+                println("[RaceTopPool] generation failed grade=$grade subject=$subject step=$stepOrder attempt=$attempt/$MAX_ASSIGNMENT_GENERATION_ATTEMPTS: $detail")
+                if (attempt == MAX_ASSIGNMENT_GENERATION_ATTEMPTS) {
+                    throw IllegalStateException(
+                        "Không tạo được đề ${subject.uppercase()} level $stepOrder sau $attempt lần thử: $detail",
+                        error
+                    )
+                }
+                continue
             }
             val validation = AssignmentValidator.validate(
                 title = candidate.title,
