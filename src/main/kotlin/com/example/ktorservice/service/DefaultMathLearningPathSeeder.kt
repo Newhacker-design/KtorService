@@ -29,6 +29,17 @@ object DefaultMathLearningPathSeeder {
         12 to listOf("Ứng dụng đạo hàm" to "Đơn điệu, cực trị, tiệm cận và tối ưu", "Hàm số mũ và logarit" to "Giải phương trình, bất phương trình", "Nguyên hàm và tích phân" to "Tính tích phân và ứng dụng", "Vectơ và tọa độ không gian" to "Phương trình đường thẳng, mặt phẳng", "Hình học Oxyz" to "Tính góc, khoảng cách và mặt cầu", "Xác suất và thống kê" to "Phân tích số liệu và xác suất", "Luyện tập tổng hợp" to "Giải bài toán theo cấu trúc kiểm tra")
     ).mapValues { (_, entries) -> entries.map { (title, skill) -> StepSeed(title, skill, "Rèn luyện kiến thức: $skill.") } }
 
+    // The existing grade 4 path predates this seeder and focuses on fractions.
+    // Append the missing strands without changing existing step IDs or progress.
+    private val additionalGradeFourSteps = listOf(
+        StepSeed("Số tự nhiên và cấu tạo số", "Đọc, viết, phân tích và so sánh số tự nhiên", "Đọc, viết, phân tích cấu tạo và so sánh các số tự nhiên trong phạm vi chương trình lớp 4."),
+        StepSeed("Các phép tính với số tự nhiên", "Cộng, trừ, nhân, chia số tự nhiên", "Thực hiện phép tính, tính giá trị biểu thức và tìm thành phần chưa biết."),
+        StepSeed("Giải toán có lời văn", "Giải bài toán nhiều bước và toán tìm hai số", "Lựa chọn phép tính phù hợp để giải bài toán thực tế nhiều bước."),
+        StepSeed("Đại lượng và đo lường", "Đổi và tính toán với đơn vị đo", "Vận dụng các đơn vị đo khối lượng, thời gian, độ dài và diện tích."),
+        StepSeed("Hình học", "Nhận biết góc, đường thẳng và tính diện tích", "Nhận biết góc, hai đường thẳng vuông góc hoặc song song; tính diện tích hình đã học."),
+        StepSeed("Thống kê và biểu đồ", "Đọc, mô tả và giải quyết vấn đề từ dữ liệu", "Đọc bảng số liệu và biểu đồ, trả lời câu hỏi dựa trên dữ liệu.")
+    )
+
     fun seedIfMissing() = transaction {
         for (grade in 1..12) {
             val path = LearningPathsTable.selectAll()
@@ -61,6 +72,29 @@ object DefaultMathLearningPathSeeder {
                         it[LearningStepsTable.createdAt] = System.currentTimeMillis()
                     }
                 }
+            }
+
+            if (grade == 4) {
+                var nextOrder = (LearningStepsTable.selectAll()
+                    .where { LearningStepsTable.pathId eq pathId }
+                    .maxOfOrNull { it[LearningStepsTable.stepOrder] } ?: 0) + 1
+                val existingTitles = LearningStepsTable.selectAll()
+                    .where { LearningStepsTable.pathId eq pathId }
+                    .map { it[LearningStepsTable.title].trim().lowercase() }
+                    .toSet()
+                additionalGradeFourSteps
+                    .filterNot { it.title.trim().lowercase() in existingTitles }
+                    .forEach { seed ->
+                        LearningStepsTable.insert {
+                            it[LearningStepsTable.pathId] = pathId
+                            it[LearningStepsTable.stepOrder] = nextOrder++
+                            it[LearningStepsTable.title] = seed.title
+                            it[LearningStepsTable.skill] = seed.skill
+                            it[LearningStepsTable.description] = seed.description
+                            it[LearningStepsTable.prerequisiteStepId] = null
+                            it[LearningStepsTable.createdAt] = System.currentTimeMillis()
+                        }
+                    }
             }
         }
     }
