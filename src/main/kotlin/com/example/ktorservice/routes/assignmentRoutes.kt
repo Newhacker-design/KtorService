@@ -1450,6 +1450,14 @@ fun Route.assignmentRoutes(
                 )
             )
 
+        } catch (e: IllegalArgumentException) {
+            call.respond(
+                HttpStatusCode.BadRequest,
+                AssignmentActionResponse(
+                    success = false,
+                    message = e.message ?: "Invalid assignment submission"
+                )
+            )
         } catch (e: Exception) {
 
             println(

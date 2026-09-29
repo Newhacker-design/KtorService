@@ -144,6 +144,7 @@ class AIService {
         val correctAnswer: String = "",
         val acceptedAnswers: List<String> = emptyList(),
         val requiredConcepts: List<String> = emptyList(),
+        val requiredConceptAlternatives: List<List<String>> = emptyList(),
         val caseSensitive: Boolean = false,
         val ignoreWhitespace: Boolean = true,
         val ignorePunctuation: Boolean = false,
@@ -941,7 +942,7 @@ class AIService {
             val mathSpec = if (isMathSubject) "\"mathAnswerSpec\":{\"kind\":\"$mathKind\"}" else "\"mathAnswerSpec\":null"
             val optionsExample = if (isChoice) "[\"Lựa chọn A\",\"Lựa chọn B\",\"Lựa chọn C\",\"Lựa chọn D\"]" else "[]"
             val statementsExample = if (isTrueFalse) "[\"Mệnh đề a\",\"Mệnh đề b\",\"Mệnh đề c\",\"Mệnh đề d\"]" else "[]"
-            """            {"id":$id,"question":"...","learningObjective":"...","points":$points,"answerType":"$type","gradingMethod":"$method","sourceType":"SELF_CONTAINED","options":$optionsExample,"statements":$statementsExample,"gradingSpec":{"method":"$localMethod","acceptedAnswers":[],"requiredConcepts":[],"$mathSpec}}"""
+            """            {"id":$id,"question":"...","learningObjective":"...","points":$points,"answerType":"$type","gradingMethod":"$method","sourceType":"SELF_CONTAINED","options":$optionsExample,"statements":$statementsExample,"gradingSpec":{"method":"$localMethod","acceptedAnswers":[],"requiredConcepts":[],"requiredConceptAlternatives":[],"$mathSpec}}"""
         }
         val answerExamples = (1..questionCount).joinToString(",\n") { id ->
             "            {\"id\":$id,\"answer\":\"...\"}"
@@ -1088,13 +1089,14 @@ class AIService {
 
         === GRADINGSPEC CHO RULE ENGINE LOCAL ===
         Mỗi câu phải có gradingSpec với method là EXACT, NUMERIC, REQUIRED_CONCEPTS hoặc STEP_RUBRIC.
-        - EXACT: dùng cho đáp án ngắn; đưa các biến thể đúng vào acceptedAnswers.
+        Trước khi xuất JSON, tự giải lại câu hỏi độc lập, rồi liệt kê các cách trả lời đúng hợp lý mà học sinh có thể viết. Không thể bảo đảm liệt kê mọi cách diễn đạt; hãy đưa các biến thể thông dụng, chính tả/định dạng tương đương và cách viết theo chương trình vào trường phù hợp. Chỉ thêm biến thể chắc chắn giữ nguyên nghĩa và điều kiện đúng; tuyệt đối không thêm đáp án gần đúng, mơ hồ hoặc sai ngữ pháp khi ngữ pháp là mục tiêu kiểm tra.
+        - EXACT: dùng cho đáp án ngắn; đặt đáp án chuẩn trong correctAnswer và các biến thể đúng trong acceptedAnswers. Với Tiếng Anh, gồm dạng rút gọn/mở rộng hoặc cách viết tương đương chỉ khi vẫn thỏa đúng mục tiêu ngôn ngữ của câu. Với Sinh học, Hóa học, Vật lý, ghi biến thể chính tả/ký hiệu và định dạng số trong cùng đơn vị; không bỏ đơn vị bắt buộc, không tự giả định đổi đơn vị/độ làm tròn, không gộp ký hiệu khoa học khác nghĩa.
         - NUMERIC: chỉ dùng cho phép chấm số đơn giản; với Toán, gradingSpec.mathAnswerSpec mới quyết định định dạng đáp án.
-        - REQUIRED_CONCEPTS: dùng cho câu trả lời ngắn có 2-5 ý bắt buộc kiểm tra được.
-        - STEP_RUBRIC: chỉ dùng cho bài Toán nhiều bước; rubric.version hiện là 1, criteria phải có id, description, points, method và bằng chứng chấm được. Các method tiêu chí: EVIDENCE (acceptedEvidence), REQUIRED_CONCEPTS (requiredConcepts), FINAL_NUMERIC (expectedNumber, numericTolerance). Tổng points của criteria phải bằng điểm câu.
+        - REQUIRED_CONCEPTS: dùng cho câu trả lời ngắn có 2-5 ý bắt buộc kiểm tra được. requiredConcepts là ý chuẩn; requiredConceptAlternatives phải có cùng số nhóm, mỗi nhóm liệt kê cách diễn đạt tương đương của đúng ý ở cùng vị trí. Không liệt kê từ khóa rời có thể xuất hiện trong câu sai. acceptedAnswers có thể liệt kê một số câu trả lời hoàn chỉnh tương đương.
+        - STEP_RUBRIC: dùng cho bài Toán nhiều bước hoặc bài tự luận của môn có local rubric engine (Ngữ văn/Tiếng Việt, Tiếng Anh, Sinh học, Hóa học, Vật lý, Giáo dục sức khỏe/giới tính). rubric.version hiện là 1; criteria phải có id, description, points, method và bằng chứng chấm được. EVIDENCE.acceptedEvidence phải liệt kê các cách viết đúng có thể kiểm tra được; REQUIRED_CONCEPTS.requiredConcepts phải là ý cốt lõi; FINAL_NUMERIC dùng expectedNumber và numericTolerance. Tổng points của criteria phải bằng điểm câu. Không dùng rubric từ khóa để chấm chất lượng văn phong, lập luận hoặc ý nghĩa ngữ cảnh nếu không có tiêu chí quan sát được.
           Cấu trúc: "rubric":{"version":1,"criteria":[{"id":"method","description":"...","points":1,"method":"REQUIRED_CONCEPTS","requiredConcepts":["..."]},{"id":"work","description":"...","points":1,"method":"EVIDENCE","acceptedEvidence":["..."]},{"id":"final","description":"...","points":1,"method":"FINAL_NUMERIC","expectedNumber":"...","numericTolerance":0}]}. Chỉ sinh tiêu chí có thể nhận diện trong câu trả lời.
         Nếu môn học là Toán, mọi câu phải có gradingSpec.mathAnswerSpec với kind cụ thể: NUMBER, CALCULATION, FILL_BLANK, MULTIPLE_CHOICE, TRUE_FALSE_SET, ORDERED_TUPLE, UNORDERED_SET, QUANTITY hoặc SYMBOLIC_EXPRESSION; không dùng AUTO. NUMBER: answerKey.answer chỉ là số/phân số, không kèm đơn vị hay lời giải. CALCULATION: dùng khi đáp án chuẩn là biểu thức/phương trình cần tính. FILL_BLANK: chỉ chọn khi question có từ 1 đến 8 placeholder hiển thị nguyên văn bằng ___, □ hoặc [ ]; luôn ưu tiên □ để tránh nhầm dấu câu. Nếu không có placeholder thì không được khai báo FILL_BLANK. Với nhiều chỗ trống, answerKey.answer chỉ ghi các giá trị theo thứ tự, phân cách bằng dấu chấm phẩy. QUANTITY phải có expectedUnit. Với biểu thức ký hiệu chỉ chấp nhận acceptedAnswers được liệt kê tường minh; không giả định tương đương đại số.
-        Không dùng gradingSpec cho bài luận mở hoặc ý kiến chủ quan. acceptedAnswers chỉ chứa biến thể đúng.
+        Câu hỏi Ngữ văn mở phải có rubric chấp nhận các lập luận khác nhau khi phù hợp; không dùng một đoạn văn mẫu làm đáp án duy nhất. Với giáo dục sức khỏe/giới tính, chỉ liệt kê phương án/cách diễn đạt an toàn, đúng lứa tuổi và rõ nghĩa. acceptedAnswers chỉ chứa biến thể đúng; không tuyên bố đã bao phủ mọi cách diễn đạt.
 
         $previousText
 
@@ -1281,13 +1283,14 @@ $learningStepContext
 
         === GRADINGSPEC CHO RULE ENGINE LOCAL ===
         Mỗi câu phải có gradingSpec với method là EXACT, NUMERIC, REQUIRED_CONCEPTS hoặc STEP_RUBRIC.
-        - EXACT: dùng cho đáp án ngắn; đưa các biến thể đúng vào acceptedAnswers.
+        Trước khi xuất JSON, tự giải lại câu hỏi độc lập rồi liệt kê những cách trả lời đúng hợp lý, phổ biến. Không thể liệt kê mọi cách diễn đạt; chỉ thêm biến thể chắc chắn đúng, giữ nguyên nghĩa và phù hợp với mục tiêu câu hỏi.
+        - EXACT: ghi đáp án chuẩn trong correctAnswer, các biến thể đúng trong acceptedAnswers; với câu khoa học giữ đúng ký hiệu, trị số và đơn vị. Không tự giả định đổi đơn vị/độ làm tròn nếu đề và đặc tả chấm không nêu.
         - NUMERIC: chỉ dùng cho phép chấm số đơn giản; với Toán, gradingSpec.mathAnswerSpec mới quyết định định dạng đáp án.
-        - REQUIRED_CONCEPTS: dùng cho câu trả lời ngắn có 2-5 ý bắt buộc kiểm tra được.
-        - STEP_RUBRIC: chỉ dùng cho bài Toán nhiều bước; rubric.version hiện là 1, criteria phải có id, description, points, method và bằng chứng chấm được. Các method tiêu chí: EVIDENCE (acceptedEvidence), REQUIRED_CONCEPTS (requiredConcepts), FINAL_NUMERIC (expectedNumber, numericTolerance). Tổng points của criteria phải bằng điểm câu.
+        - REQUIRED_CONCEPTS: dùng cho 2-5 ý cốt lõi; requiredConceptAlternatives có cùng số nhóm với requiredConcepts, mỗi nhóm chứa cách diễn đạt tương đương của ý đó. Không dùng từ khóa rời; chỉ dùng các ý an toàn, đúng lứa tuổi. Có thể thêm câu trả lời hoàn chỉnh tương đương trong acceptedAnswers.
+        - STEP_RUBRIC: dùng cho Toán nhiều bước hoặc tự luận của môn có local rubric engine; criteria phải quan sát/chấm được, tổng points bằng điểm câu. Với Ngữ văn, chấp nhận nhiều lập luận có căn cứ. Với câu về sức khỏe/giới tính, chỉ chấm kiến thức và lựa chọn an toàn; không chấm suy đoán về trải nghiệm cá nhân.
           Cấu trúc: "rubric":{"version":1,"criteria":[{"id":"method","description":"...","points":1,"method":"REQUIRED_CONCEPTS","requiredConcepts":["..."]},{"id":"work","description":"...","points":1,"method":"EVIDENCE","acceptedEvidence":["..."]},{"id":"final","description":"...","points":1,"method":"FINAL_NUMERIC","expectedNumber":"...","numericTolerance":0}]}. Chỉ sinh tiêu chí có thể nhận diện trong câu trả lời.
         Nếu môn học là Toán, mọi câu phải có gradingSpec.mathAnswerSpec với kind cụ thể: NUMBER, CALCULATION, FILL_BLANK, MULTIPLE_CHOICE, TRUE_FALSE_SET, ORDERED_TUPLE, UNORDERED_SET, QUANTITY hoặc SYMBOLIC_EXPRESSION; không dùng AUTO. NUMBER: answerKey.answer chỉ là số/phân số, không kèm đơn vị hay lời giải. CALCULATION: dùng khi đáp án chuẩn là biểu thức/phương trình cần tính. FILL_BLANK: chỉ chọn khi question có từ 1 đến 8 placeholder hiển thị nguyên văn bằng ___, □ hoặc [ ]; luôn ưu tiên □ để tránh nhầm dấu câu. Nếu không có placeholder thì không được khai báo FILL_BLANK. Với nhiều chỗ trống, answerKey.answer chỉ ghi các giá trị theo thứ tự, phân cách bằng dấu chấm phẩy. QUANTITY phải có expectedUnit. Với biểu thức ký hiệu chỉ chấp nhận acceptedAnswers được liệt kê tường minh; không giả định tương đương đại số.
-        Không dùng gradingSpec cho bài luận mở hoặc ý kiến chủ quan. acceptedAnswers chỉ chứa biến thể đúng.
+        Với bài luận mở, dùng rubric có tiêu chí và bằng chứng thay vì đáp án văn mẫu. Không đưa các cách trả lời nguy hiểm, sai ngữ cảnh hoặc chỉ gần đúng vào tập được chấp nhận.
 
         $previousText
 
@@ -1312,6 +1315,7 @@ $learningStepContext
                 "method": "REQUIRED_CONCEPTS",
                 "acceptedAnswers": [],
                 "requiredConcepts": ["...", "..."],
+                "requiredConceptAlternatives": [["...", "..."], ["...", "..."]],
                 "caseSensitive": false,
                 "ignoreWhitespace": false,
                 "ignorePunctuation": true,
@@ -1331,6 +1335,7 @@ $learningStepContext
                 "method": "EXACT",
                 "acceptedAnswers": ["..."],
                 "requiredConcepts": [],
+                "requiredConceptAlternatives": [],
                 "caseSensitive": false,
                 "ignoreWhitespace": true,
                 "ignorePunctuation": false,
@@ -1350,6 +1355,7 @@ $learningStepContext
                 "method": "REQUIRED_CONCEPTS",
                 "acceptedAnswers": [],
                 "requiredConcepts": ["...", "..."],
+                "requiredConceptAlternatives": [["...", "..."], ["...", "..."]],
                 "caseSensitive": false,
                 "ignoreWhitespace": false,
                 "ignorePunctuation": true,
@@ -2276,6 +2282,7 @@ $learningStepContext
         val errors = mutableListOf<String>()
         val isMathSubject = subject.contains("toán", ignoreCase = true) ||
                 subject.contains("math", ignoreCase = true)
+        val supportsLocalSubjectGrading = LocalSubjectAssignmentGenerator.supports(subject)
 
         if (assignment.title.isBlank()) {
             errors += "Assignment title is empty"
@@ -2375,6 +2382,9 @@ $learningStepContext
             if (spec.correctAnswer.isBlank()) {
                 errors += "Question ${question.id} has no gradingSpec correctAnswer"
             }
+            if (spec.acceptedAnswers.any(String::isBlank)) {
+                errors += "Question ${question.id} has a blank accepted answer"
+            }
             if (!spec.numericTolerance.isFinite() || spec.numericTolerance < 0.0) {
                 errors += "Question ${question.id} has invalid numericTolerance"
             }
@@ -2385,15 +2395,15 @@ $learningStepContext
                 errors += "Question ${question.id} requires at least one grading concept"
             }
             if (
-                !isMathSubject &&
+                !isMathSubject && !supportsLocalSubjectGrading &&
                 spec.method == RuleGradingMethod.NUMERIC &&
                 !isNumericAnswer(spec.correctAnswer)
             ) {
                 errors += "Question ${question.id} has a non-numeric answer for NUMERIC grading"
             }
             if (spec.method == RuleGradingMethod.STEP_RUBRIC) {
-                if (!isMathSubject) {
-                    errors += "Question ${question.id} uses STEP_RUBRIC outside a math subject"
+                if (!isMathSubject && !supportsLocalSubjectGrading) {
+                    errors += "Question ${question.id} uses STEP_RUBRIC for a subject without a local rubric engine"
                 }
                 val rubric = spec.rubric
                 if (rubric == null) {
@@ -2439,6 +2449,14 @@ $learningStepContext
                 }
             } else if (spec.rubric != null) {
                 errors += "Question ${question.id} has a rubric but does not use STEP_RUBRIC"
+            }
+            if (spec.method == RuleGradingMethod.REQUIRED_CONCEPTS &&
+                spec.requiredConceptAlternatives.size != spec.requiredConcepts.size
+            ) {
+                errors += "Question ${question.id} must provide one requiredConceptAlternatives group per requiredConcept"
+            }
+            if (spec.requiredConceptAlternatives.any { variants -> variants.isEmpty() || variants.any(String::isBlank) }) {
+                errors += "Question ${question.id} has invalid requiredConceptAlternatives; provide one non-empty variant list per requiredConcept"
             }
             if (isMathSubject) {
                 val mathSpec = spec.mathAnswerSpec

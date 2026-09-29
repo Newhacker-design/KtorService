@@ -238,7 +238,11 @@ class AssignmentService(
                     difficulty = effectiveDifficulty
                 )
 
-            if (activeAssignment != null) {
+            if (
+                activeAssignment != null &&
+                (!LocalSubjectAssignmentGenerator.supports(subject) ||
+                        isLocallyGradable(activeAssignment.assignment))
+            ) {
                 println(
                     "REUSING ACTIVE ASSIGNMENT FOR LEARNING STEP: " +
                             "assignment=${activeAssignment.assignmentId} " +
@@ -276,7 +280,12 @@ class AssignmentService(
 
         println("NO AVAILABLE ASSIGNMENT IN STORAGE")
         println("ASSIGNMENT STORAGE EMPTY")
-        println("WAITING FOR AI SEMAPHORE...")
+        val useLocalGenerator = LocalSubjectAssignmentGenerator.supports(subject)
+        if (useLocalGenerator) {
+            println("Using built-in assignment bank; AI generation and review are disabled for $subject")
+        } else {
+            println("WAITING FOR AI SEMAPHORE...")
+        }
         // ========================================================
         // BƯỚC 2
         // Generate + Validate + AI Quality Review
@@ -287,6 +296,27 @@ class AssignmentService(
         var lastErrors =
             emptyList<String>()
 
+        if (useLocalGenerator) {
+            val candidate = LocalSubjectAssignmentGenerator.generate(
+                grade = grade,
+                subject = subject,
+                difficulty = effectiveDifficulty
+            )
+            val validation = AssignmentValidator.validate(
+                title = candidate.title,
+                questions = candidate.questions,
+                answerKey = candidate.answerKey,
+                gradingGuide = candidate.gradingGuide,
+                totalScore = candidate.totalScore,
+                learningMaterial = candidate.learningMaterial,
+                grade = grade,
+                subject = subject
+            )
+            check(validation.valid) {
+                "Local assignment bank failed validation: ${validation.errors.joinToString("; ")}"
+            }
+            generated = candidate
+        } else {
         for (attempt in 1..MAX_ASSIGNMENT_GENERATION_ATTEMPTS) {
 
             println(
@@ -507,6 +537,7 @@ class AssignmentService(
                             ?: "Unknown assignment generation error"
                     )
             }
+        }
         }
 
         // ========================================================
@@ -953,13 +984,35 @@ class AssignmentService(
                                 }
                                 .count() > 0
 
-                        matchesSubject && matchesLearningStep && !alreadyAssigned
+                        matchesSubject && matchesLearningStep && !alreadyAssigned &&
+                                (!LocalSubjectAssignmentGenerator.supports(subject) ||
+                                        isLocallyGradable(rowToResult(row)))
                     }
                     ?.let {
                         rowToResult(it)
                     }
             }
         }
+    }
+
+    private fun isLocallyGradable(assignment: AssignmentResult): Boolean {
+        val supportedMethods = setOf(
+            AIService.RuleGradingMethod.EXACT,
+            AIService.RuleGradingMethod.NUMERIC,
+            AIService.RuleGradingMethod.REQUIRED_CONCEPTS
+        )
+        return assignment.questionMetadata.isNotEmpty() &&
+                assignment.questionMetadata.all { question ->
+                    val spec = question.gradingSpec
+                    spec != null && spec.method in supportedMethods &&
+                            spec.correctAnswer.isNotBlank() &&
+                            (spec.method != AIService.RuleGradingMethod.REQUIRED_CONCEPTS ||
+                                    spec.requiredConcepts.isNotEmpty()) &&
+                            (spec.mathAnswerSpec == null ||
+                                    (spec.mathAnswerSpec.kind == AIService.MathAnswerKind.TRUE_FALSE_SET &&
+                                            question.statements.size == 4 &&
+                                            spec.correctAnswer.split(',', ';', '|').size == 4))
+                }
     }
 
 
@@ -1234,6 +1287,9 @@ class AssignmentService(
                 questions = details
             )
         } else {
+            require(!LocalSubjectAssignmentGenerator.supports(userAssignment.assignment.subject)) {
+                "This subject uses local grading; the Receiver must submit its local grading result."
+            }
             val assignmentForGrading = buildGeneratedAssignmentForGrading(
                 assignment = userAssignment.assignment
             )

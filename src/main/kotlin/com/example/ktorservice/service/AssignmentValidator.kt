@@ -78,7 +78,8 @@ object AssignmentValidator {
 
         val errors = mutableListOf<String>()
         val isMath = subject?.trim()?.lowercase() in setOf("math", "mathematics", "toán", "toan")
-        val expectedQuestionCount = if (isMath) {
+        val usesSubjectMatrix = subject?.let { LocalSubjectAssignmentGenerator.supports(it) } == true
+        val expectedQuestionCount = if (isMath || usesSubjectMatrix) {
             when (grade ?: -1) {
                 in 1..5 -> 10
                 in 6..9 -> 16
