@@ -2,6 +2,12 @@ package com.example.ktorservice.model
 
 import com.example.ktorservice.service.AIService
 import kotlinx.serialization.Serializable
+
+@Serializable
+enum class AssignmentMode {
+    PRACTICE,
+    RACE_TOP
+}
 @Serializable
 data class QuestionMetadata(
     val id: Int,
@@ -79,6 +85,7 @@ data class UserAssignmentResponse(
 
     val startedAt: Long? = null,
     val completedAt: Long? = null,
+    val mode: AssignmentMode = AssignmentMode.PRACTICE,
     val assignment: AssignmentStudentData? = null,
     val message: String? = null
 )

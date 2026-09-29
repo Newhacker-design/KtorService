@@ -2,6 +2,7 @@ package com.example.ktorservice.routes
 
 import com.example.ktorservice.model.AssignedAssignmentResponse
 import com.example.ktorservice.model.AssignmentActionResponse
+import com.example.ktorservice.model.AssignmentMode
 import com.example.ktorservice.model.AssignmentDetailResponse
 import com.example.ktorservice.model.AssignmentListResponse
 import com.example.ktorservice.model.AssignmentQuestion
@@ -295,6 +296,26 @@ fun Route.assignmentRoutes(
                         }.getOrNull()
                     }
 
+            val modeValue = call.request.queryParameters["mode"]
+            val mode = modeValue?.uppercase()?.let { value ->
+                runCatching { AssignmentMode.valueOf(value) }.getOrNull()
+            } ?: if (modeValue.isNullOrBlank()) {
+                AssignmentMode.PRACTICE
+            } else {
+                null
+            }
+
+            if (mode == null) {
+                call.respond(
+                    HttpStatusCode.BadRequest,
+                    UserAssignmentResponse(
+                        success = false,
+                        message = "Invalid mode. Use PRACTICE or RACE_TOP"
+                    )
+                )
+                return@get
+            }
+
             // ========================================================
             // 6. VALIDATE DIFFICULTY
             // ========================================================
@@ -382,6 +403,7 @@ fun Route.assignmentRoutes(
             println(
                 "DIFFICULTY = $difficulty"
             )
+            println("MODE = $mode")
 
             // ========================================================
             // 10. GET ASSIGNMENT FOR CHILD
@@ -399,7 +421,8 @@ fun Route.assignmentRoutes(
                     grade = grade,
                     subject = subject,
                     topic = topic,
-                    difficulty = difficulty
+                    difficulty = difficulty,
+                    mode = mode
                 )
 
             // ========================================================
@@ -465,6 +488,8 @@ fun Route.assignmentRoutes(
 
                     completedAt =
                         result.completedAt,
+
+                    mode = result.mode,
 
                     assignment =
                         AssignmentStudentData(
@@ -1113,6 +1138,8 @@ fun Route.assignmentRoutes(
 
                         completedAt =
                             result.completedAt,
+
+                        mode = result.mode,
 
                         assignment =
                             AssignmentStudentData(

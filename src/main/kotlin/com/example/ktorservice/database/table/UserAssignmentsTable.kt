@@ -44,6 +44,10 @@ object UserAssignmentsTable : Table("user_assignments") {
         integer("learning_step_id")
             .nullable()
 
+    val mode =
+        varchar("mode", 20)
+            .default("PRACTICE")
+
     override val primaryKey =
         PrimaryKey(id)
 

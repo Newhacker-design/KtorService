@@ -120,6 +120,10 @@ object DatabaseFactory {
                 "ALTER TABLE assignments " +
                         "ADD COLUMN IF NOT EXISTS learning_step_id INTEGER NULL"
             )
+            exec(
+                "ALTER TABLE user_assignments " +
+                        "ADD COLUMN IF NOT EXISTS mode VARCHAR(20) NOT NULL DEFAULT 'PRACTICE'"
+            )
 
             // Reuse past path-generated assignments when their step association is unambiguous.
             exec(

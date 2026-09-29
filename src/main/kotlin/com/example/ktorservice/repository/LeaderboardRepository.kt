@@ -46,6 +46,7 @@ class LeaderboardRepository {
             appendLine("    JOIN assignments a ON a.id = ua.assignment_id")
             appendLine("    JOIN users u ON u.id = ua.user_id")
             appendLine("    WHERE ua.status IN ('COMPLETE', 'COMPLETED')")
+            appendLine("      AND ua.mode = 'RACE_TOP'")
             appendLine("      AND ua.completed_at IS NOT NULL")
             appendLine("      AND ua.completed_at >= $sinceMillis")
             appendLine("      AND u.birth_year IS NOT NULL")

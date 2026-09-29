@@ -3,6 +3,7 @@ package com.example.ktorservice.service
 import com.example.ktorservice.database.UsersTable
 import com.example.ktorservice.database.table.AssignmentsTable
 import com.example.ktorservice.database.table.UserAssignmentsTable
+import com.example.ktorservice.model.AssignmentMode
 import com.example.ktorservice.model.QuestionMetadata
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.withPermit
@@ -63,6 +64,7 @@ class AssignmentService(
                         )
                         .where {
                             (UserAssignmentsTable.status eq "COMPLETED") and
+                                    (UserAssignmentsTable.mode eq AssignmentMode.RACE_TOP.name) and
                                     (UsersTable.role eq "CHILD")
                         }
 
@@ -124,7 +126,8 @@ class AssignmentService(
         grade: Int,
         subject: String,
         topic: String?,
-        difficulty: AIService.Difficulty
+        difficulty: AIService.Difficulty,
+        mode: AssignmentMode = AssignmentMode.PRACTICE
     ): UserAssignmentResult {
 
         require(grade in 1..12) {
@@ -140,6 +143,23 @@ class AssignmentService(
                 grade = grade,
                 subject = subject
             )
+        val recentRacePercent =
+            nextLearningStep?.second?.let { progress ->
+                if (progress.attemptCount == 0) null else progress.lastScore
+            } ?: if (mode == AssignmentMode.RACE_TOP) {
+                getRecentRaceTopAverage(userId, grade, subject)
+            } else {
+                null
+            }
+        val effectiveDifficulty = when (mode) {
+            AssignmentMode.PRACTICE -> difficulty
+            AssignmentMode.RACE_TOP -> when {
+                recentRacePercent == null -> AIService.Difficulty.MEDIUM
+                recentRacePercent < 50.0 -> AIService.Difficulty.EASY
+                recentRacePercent >= 85.0 -> AIService.Difficulty.HARD
+                else -> AIService.Difficulty.MEDIUM
+            }
+        }
 // ========================================================
 // CHECK EXISTING ACTIVE ASSIGNMENT FOR CURRENT LEARNING STEP
 // ========================================================
@@ -203,7 +223,9 @@ class AssignmentService(
         println("GRADE = $grade")
         println("SUBJECT = $subject")
         println("TOPIC = $topic")
-        println("DIFFICULTY = $difficulty")
+        println("MODE = $mode")
+        println("REQUESTED DIFFICULTY = $difficulty")
+        println("EFFECTIVE DIFFICULTY = $effectiveDifficulty")
 
         val learningStepId = nextLearningStep?.first?.id
 
@@ -211,7 +233,9 @@ class AssignmentService(
             val activeAssignment =
                 findActiveAssignmentForLearningStep(
                     userId = userId,
-                    learningStepId = learningStepId
+                    learningStepId = learningStepId,
+                    mode = mode,
+                    difficulty = effectiveDifficulty
                 )
 
             if (activeAssignment != null) {
@@ -230,7 +254,7 @@ class AssignmentService(
                 grade = grade,
                 subject = subject,
                 topic = topic,
-                difficulty = difficulty,
+                difficulty = effectiveDifficulty,
                 learningStepId = learningStepId
             )
 
@@ -244,7 +268,8 @@ class AssignmentService(
             return createUserAssignmentImmediately(
                 userId = userId,
                 assignment = existingAssignment,
-                learningStepId = learningStepId
+                learningStepId = learningStepId,
+                mode = mode
             )
         }
 
@@ -294,7 +319,7 @@ class AssignmentService(
                                 grade = grade,
                                 subject = subject,
                                 topic = topic,
-                                difficulty = difficulty,
+                                difficulty = effectiveDifficulty,
 
                                 qualityFeedback =
                                     lastErrors
@@ -397,7 +422,7 @@ class AssignmentService(
                                 grade = grade,
                                 subject = subject,
                                 topic = topic,
-                                difficulty = difficulty,
+                                difficulty = effectiveDifficulty,
 
                                 learningStepTitle =
                                     nextLearningStep?.first?.title,
@@ -575,7 +600,7 @@ class AssignmentService(
                                 topic
 
                             it[AssignmentsTable.difficulty] =
-                                difficulty.name
+                                effectiveDifficulty.name
 
                             it[AssignmentsTable.title] =
                                 finalGenerated.title
@@ -619,7 +644,7 @@ class AssignmentService(
                         answerKey = answerKey,
                         gradingGuide = gradingGuide,
                         totalScore = finalGenerated.totalScore,
-                        difficulty = difficulty,
+                        difficulty = effectiveDifficulty,
                         questionMetadata =
                             finalGenerated.questions.map { question ->
 
@@ -665,14 +690,16 @@ class AssignmentService(
         return createUserAssignmentImmediately(
             userId = userId,
             assignment = assignment,
-            learningStepId = nextLearningStep?.first?.id
+            learningStepId = nextLearningStep?.first?.id,
+            mode = mode
         )
     }
 
     private suspend fun createUserAssignmentImmediately(
         userId: Int,
         assignment: AssignmentResult,
-        learningStepId: Int? = null
+        learningStepId: Int? = null,
+        mode: AssignmentMode = AssignmentMode.PRACTICE
     ): UserAssignmentResult {
 
         return withContext(Dispatchers.IO) {
@@ -749,6 +776,9 @@ class AssignmentService(
 
                         it[UserAssignmentsTable.learningStepId] =
                             learningStepId
+
+                        it[UserAssignmentsTable.mode] =
+                            mode.name
                     }
 
                 val userAssignmentId =
@@ -774,7 +804,8 @@ class AssignmentService(
                     completedAt = null,
                     assignment = assignment,
                     questionMetadata =
-                        assignment.questionMetadata
+                        assignment.questionMetadata,
+                    mode = mode
                 )
             }
         }
@@ -782,14 +813,17 @@ class AssignmentService(
 
     private suspend fun findActiveAssignmentForLearningStep(
         userId: Int,
-        learningStepId: Int
+        learningStepId: Int,
+        mode: AssignmentMode,
+        difficulty: AIService.Difficulty
     ): UserAssignmentResult? = withContext(Dispatchers.IO) {
         transaction {
             val userAssignment = UserAssignmentsTable
                 .selectAll()
                 .where {
                     (UserAssignmentsTable.userId eq userId) and
-                            (UserAssignmentsTable.learningStepId eq learningStepId)
+                            (UserAssignmentsTable.learningStepId eq learningStepId) and
+                            (UserAssignmentsTable.mode eq mode.name)
                 }
                 .firstOrNull {
                     it[UserAssignmentsTable.status] != "COMPLETED"
@@ -806,7 +840,45 @@ class AssignmentService(
                 ?.let(::rowToResult)
                 ?: return@transaction null
 
+            if (assignment.difficulty != difficulty) {
+                return@transaction null
+            }
             rowToUserAssignment(userAssignment, assignment)
+        }
+    }
+
+    private suspend fun getRecentRaceTopAverage(
+        userId: Int,
+        grade: Int,
+        subject: String
+    ): Double? = withContext(Dispatchers.IO) {
+        transaction {
+            val recentPercents = UserAssignmentsTable
+                .innerJoin(AssignmentsTable)
+                .select(
+                    UserAssignmentsTable.score,
+                    UserAssignmentsTable.completedAt,
+                    AssignmentsTable.totalScore,
+                    AssignmentsTable.subject
+                )
+                .where {
+                    (UserAssignmentsTable.userId eq userId) and
+                            (UserAssignmentsTable.mode eq AssignmentMode.RACE_TOP.name) and
+                            (UserAssignmentsTable.status eq "COMPLETED") and
+                            (AssignmentsTable.grade eq grade)
+                }
+                .orderBy(UserAssignmentsTable.completedAt to SortOrder.DESC)
+                .mapNotNull { row ->
+                    if (!row[AssignmentsTable.subject].equals(subject, ignoreCase = true)) {
+                        return@mapNotNull null
+                    }
+                    val score = row[UserAssignmentsTable.score] ?: return@mapNotNull null
+                    val total = row[AssignmentsTable.totalScore]
+                    if (total <= 0.0) null else score / total * 100.0
+                }
+                .take(3)
+
+            recentPercents.takeIf { it.isNotEmpty() }?.average()
         }
     }
 
@@ -1745,6 +1817,11 @@ class AssignmentService(
             learningStepId =
                 row[UserAssignmentsTable.learningStepId],
 
+            mode =
+                runCatching {
+                    AssignmentMode.valueOf(row[UserAssignmentsTable.mode])
+                }.getOrDefault(AssignmentMode.PRACTICE),
+
             status =
                 row[UserAssignmentsTable.status],
 
@@ -1823,7 +1900,8 @@ class AssignmentService(
         val completedAt: Long?,
         val assignment: AssignmentResult,
         val questionMetadata: List<QuestionMetadata>,
-        val learningStepId: Int? = null
+        val learningStepId: Int? = null,
+        val mode: AssignmentMode = AssignmentMode.PRACTICE
     )
 
 
