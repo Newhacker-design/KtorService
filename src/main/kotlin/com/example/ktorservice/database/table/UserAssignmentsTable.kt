@@ -51,11 +51,4 @@ object UserAssignmentsTable : Table("user_assignments") {
     override val primaryKey =
         PrimaryKey(id)
 
-    init {
-        uniqueIndex(
-            "uq_user_assignment",
-            userId,
-            assignmentId
-        )
-    }
 }

@@ -124,6 +124,12 @@ object DatabaseFactory {
                 "ALTER TABLE user_assignments " +
                         "ADD COLUMN IF NOT EXISTS mode VARCHAR(20) NOT NULL DEFAULT 'PRACTICE'"
             )
+            // One student may take the same stored assignment in both modes.
+            exec("DROP INDEX IF EXISTS uq_user_assignment")
+            exec(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_user_assignment_mode " +
+                        "ON user_assignments (user_id, assignment_id, mode)"
+            )
 
             // Reuse past path-generated assignments when their step association is unambiguous.
             exec(

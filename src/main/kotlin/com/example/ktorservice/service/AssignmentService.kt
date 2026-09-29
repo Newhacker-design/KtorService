@@ -255,7 +255,8 @@ class AssignmentService(
                 subject = subject,
                 topic = topic,
                 difficulty = effectiveDifficulty,
-                learningStepId = learningStepId
+                learningStepId = learningStepId,
+                mode = mode
             )
 
         if (existingAssignment != null) {
@@ -712,6 +713,7 @@ class AssignmentService(
                         .where {
 
                             (UserAssignmentsTable.userId eq userId) and
+                                    (UserAssignmentsTable.mode eq mode.name) and
                                     (
                                             UserAssignmentsTable.assignmentId eq
                                                     assignment.id
@@ -897,7 +899,8 @@ class AssignmentService(
         subject: String,
         topic: String?,
         difficulty: AIService.Difficulty,
-        learningStepId: Int? = null
+        learningStepId: Int? = null,
+        mode: AssignmentMode
     ): AssignmentResult? {
 
         return withContext(Dispatchers.IO) {
@@ -942,6 +945,7 @@ class AssignmentService(
                                 .where {
 
                                     (UserAssignmentsTable.userId eq userId) and
+                                            (UserAssignmentsTable.mode eq mode.name) and
                                             (
                                                     UserAssignmentsTable.assignmentId eq
                                                             assignmentId
