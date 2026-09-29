@@ -11,6 +11,9 @@ import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.transactions.transaction
 
 class LearningPathService {
+    private fun normalizeSubject(subject: String): String =
+        subject.trim().uppercase(java.util.Locale.ROOT)
+
     fun getPathById(id: Int): LearningPath? = transaction {
 
         LearningPathsTable
@@ -28,16 +31,16 @@ class LearningPathService {
         grade: Int,
         subject: String
     ): LearningPath? {
+        val normalizedSubject = normalizeSubject(subject)
         return transaction {
             LearningPathsTable
                 .selectAll()
                 .where {
-                    (LearningPathsTable.grade eq grade) and
-                            (LearningPathsTable.subject eq subject)
+                    LearningPathsTable.grade eq grade
                 }
-                .limit(1)
-                .map { it.toLearningPath() }
-                .singleOrNull()
+                .firstOrNull { it[LearningPathsTable.subject].trim()
+                    .uppercase(java.util.Locale.ROOT) == normalizedSubject }
+                ?.toLearningPath()
         }
     }
 
@@ -77,7 +80,7 @@ class LearningPathService {
             val insertedRow = LearningPathsTable
                 .insert {
                     it[LearningPathsTable.grade] = grade
-                    it[LearningPathsTable.subject] = subject.trim()
+                    it[LearningPathsTable.subject] = normalizeSubject(subject)
                     it[LearningPathsTable.name] = name.trim()
                     it[LearningPathsTable.description] =
                         description?.trim()?.takeIf { value ->
@@ -194,17 +197,15 @@ class LearningPathService {
         subject: String
     ): Pair<LearningStep, StudentLearningProgress>? {
 
+        val normalizedSubject = normalizeSubject(subject)
         return transaction {
 
             val path = LearningPathsTable
                 .selectAll()
-                .where {
-                    (LearningPathsTable.grade eq grade) and
-                            (LearningPathsTable.subject eq subject)
-                }
-                .limit(1)
+                .where { LearningPathsTable.grade eq grade }
                 .map { it.toLearningPath() }
-                .singleOrNull()
+                .firstOrNull { it.subject.trim()
+                    .uppercase(java.util.Locale.ROOT) == normalizedSubject }
                 ?: return@transaction null
 
             val steps = LearningStepsTable

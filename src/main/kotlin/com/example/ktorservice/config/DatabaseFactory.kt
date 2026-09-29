@@ -7,10 +7,14 @@ import com.example.ktorservice.database.LicensesTable
 import com.example.ktorservice.database.SessionsTable
 import com.example.ktorservice.database.UsersTable
 import com.example.ktorservice.database.table.AssignmentsTable
+import com.example.ktorservice.database.table.LearningPathsTable
+import com.example.ktorservice.database.table.LearningStepsTable
 import com.example.ktorservice.database.table.LocationTable
 import com.example.ktorservice.database.table.ParentChildrenTable
+import com.example.ktorservice.database.table.StudentLearningProgressTable
 import com.example.ktorservice.database.table.UserAssignmentsTable
 import com.example.ktorservice.database.table.ViewedItems
+import com.example.ktorservice.service.DefaultMathLearningPathSeeder
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
 import org.jetbrains.exposed.sql.Database
@@ -101,6 +105,9 @@ object DatabaseFactory {
                 SessionsTable,
                 AssignmentsTable,
                 UserAssignmentsTable,
+                LearningPathsTable,
+                LearningStepsTable,
+                StudentLearningProgressTable,
                 ParentChildrenTable,
                 VideosTable,
 
@@ -108,6 +115,9 @@ object DatabaseFactory {
                 DeviceControlsTable
             )
         }
+
+        // Idempotently add baseline math paths for grades 1–12.
+        DefaultMathLearningPathSeeder.seedIfMissing()
 
         println("========================================")
         println("POSTGRESQL DATABASE INITIALIZED")
