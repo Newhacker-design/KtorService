@@ -127,6 +127,7 @@ object AssignmentValidator {
             validateQuestion(
                 question = question,
                 errors = errors,
+                subject = subject.orEmpty(),
                 // Curated subject-bank wording can naturally repeat key terms
                 // (e.g. names of substances). Keep malformed-phrase checks,
                 // but don't reject the bank on the adjacent-word heuristic.
@@ -232,7 +233,10 @@ object AssignmentValidator {
             text = gradingGuide,
             fieldName = "Grading guide",
             errors = errors,
-            checkQuestionStructure = false
+            checkQuestionStructure = false,
+            // Rubrics commonly use constructions such as "... cho mỗi câu. Câu 1...";
+            // this is a structural repetition, not duplicated generated prose.
+            ignoreRepeatedWords = true
         )
 
         // =====================================================
@@ -301,6 +305,7 @@ object AssignmentValidator {
     private fun validateQuestion(
         question: AIService.GeneratedQuestion,
         errors: MutableList<String>,
+        subject: String,
         ignoreRepeatedWords: Boolean
     ) {
 
@@ -442,6 +447,7 @@ object AssignmentValidator {
             validateQuestionStructure(
                 id = id,
                 text = text,
+                subject = subject,
                 errors = errors
             )
         }
@@ -729,6 +735,7 @@ object AssignmentValidator {
     private fun validateQuestionStructure(
         id: Int,
         text: String,
+        subject: String,
         errors: MutableList<String>
     ) {
 
@@ -744,8 +751,9 @@ object AssignmentValidator {
         // "Nêu...", "Giải thích...", "Tính..."
         // -----------------------------------------------------
 
-        val questionWords = listOf(
+        val commonQuestionWords = listOf(
             "hãy",
+            "em hãy",
             "nêu",
             "cho biết",
             "giải thích",
@@ -766,8 +774,70 @@ object AssignmentValidator {
             "mô tả",
             "phân tích",
             "kể",
-            "viết"
+            "viết",
+            "đọc",
+            "dựa vào",
+            "theo văn bản",
+            "theo đoạn trích",
+            "nhận xét",
+            "chỉ ra",
+            "tìm",
+            "hoàn thành",
+            "đặt",
+            "điền",
+            "chọn",
+            "khoanh",
+            "sắp xếp",
+            "liên hệ",
+            "rút ra",
+            "xác lập",
+            "bày tỏ",
+            "nói",
+            "thuật lại",
+            "tóm tắt",
+            "trả lời",
+            "em hiểu",
+            "em có đồng ý",
+            "em nghĩ",
+            "em cảm nhận"
         )
+
+        val subjectKey = subject.trim().lowercase()
+        val subjectQuestionWords = when {
+            subjectKey in setOf("english", "tiếng anh", "anh") || subjectKey.contains("english") -> listOf(
+                "choose", "select", "complete", "fill in", "match", "underline",
+                "circle", "correct", "write", "read", "listen", "answer",
+                "reorder", "rearrange", "pronounce", "translate", "what does",
+                "which", "where", "when", "who", "why", "how many", "how much",
+                "how often", "how long", "how old", "what time"
+            )
+            subjectKey in setOf("physics", "vật lý", "lý") || subjectKey.contains("physics") -> listOf(
+                "tính", "đo", "quan sát", "dự đoán", "xác định", "mô tả",
+                "giải thích", "so sánh", "phân loại", "chọn", "hoàn thành",
+                "calculate", "measure", "observe", "predict", "identify", "describe",
+                "compare", "classify", "which", "what happens", "how does"
+            )
+            subjectKey in setOf("chemistry", "hóa", "hóa học") || subjectKey.contains("chemistry") -> listOf(
+                "tính", "viết", "cân bằng", "xác định", "phân loại", "nêu",
+                "giải thích", "so sánh", "chọn", "hoàn thành", "calculate",
+                "write", "balance", "identify", "classify", "explain", "compare", "which"
+            )
+            subjectKey in setOf("biology", "sinh", "sinh học") || subjectKey.contains("biology") -> listOf(
+                "quan sát", "phân loại", "mô tả", "nêu", "xác định", "so sánh",
+                "giải thích", "dự đoán", "chọn", "trình bày", "observe", "classify",
+                "describe", "identify", "compare", "explain", "predict", "which"
+            )
+            subjectKey in setOf("literature", "văn", "ngữ văn", "tiếng việt") ||
+                    subjectKey.contains("literature") || subjectKey.contains("văn") -> listOf(
+                "đọc", "dựa vào", "theo văn bản", "theo đoạn trích", "nhận xét",
+                "chỉ ra", "tìm", "liên hệ", "rút ra", "bày tỏ", "em hiểu",
+                "em có đồng ý", "em nghĩ", "em cảm nhận", "tóm tắt", "kể lại",
+                "phân tích", "viết", "nêu", "giải thích", "trình bày"
+            )
+            else -> emptyList()
+        }
+
+        val questionWords = commonQuestionWords + subjectQuestionWords
 
         val hasQuestionWord =
             questionWords.any {
