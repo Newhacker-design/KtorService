@@ -374,16 +374,21 @@ class AIService {
         }
 
         val parsedAssignment = parseResponse(response)
+        val sanitizedAssignment = if (isMathSubject(subject)) parsedAssignment else parsedAssignment.copy(
+            questions = parsedAssignment.questions.map { question ->
+                question.copy(gradingSpec = question.gradingSpec.copy(mathAnswerSpec = null))
+            }
+        )
         val assignment = if (
             !sexEducation && isMathSubject(subject) && grade in 1..12
         ) {
             repairInvalidMathChoices(
-                assignment = parsedAssignment,
+                assignment = sanitizedAssignment,
                 grade = grade,
                 subject = subject
             )
         } else {
-            parsedAssignment
+            sanitizedAssignment
         }
 
         if (sexEducation) {
@@ -641,7 +646,28 @@ class AIService {
             )
         }
 
-        val questions = if (!isMath) baseQuestions else {
+        val questions = if (!isMath && !isSexEducation(subject) && LocalSubjectAssignmentGenerator.supports(subject)) {
+            val count = subjectQuestionCount(grade)
+            val matrix = SubjectAssessmentMatrix.forSubject(subject, grade)
+            val levels = listOf(CognitiveLevel.RECALL, CognitiveLevel.UNDERSTAND, CognitiveLevel.APPLY, CognitiveLevel.REASON)
+            (1..count).map { index ->
+                val template = baseQuestions[(index - 1) % baseQuestions.size]
+                val matrixTopic = matrix?.strands?.let { strands ->
+                    val weightedIndex = ((index - 1) * 100 / count) % 100
+                    var cumulative = 0
+                    strands.firstOrNull { strand ->
+                        cumulative += strand.weight
+                        weightedIndex < cumulative
+                    }?.topic
+                }
+                template.copy(
+                    id = index,
+                    cognitiveLevel = levels[((index - 1) * levels.size) / count],
+                    purpose = "Đánh giá câu $index trong level theo kỹ năng hiện tại${matrixTopic?.let { "; mạch nội dung: $it" }.orEmpty()}.",
+                    avoid = "Không lặp ý, dữ kiện hay cách hỏi của câu khác; không vượt chương trình lớp $grade."
+                )
+            }
+        } else if (!isMath) baseQuestions else {
             val count = mathQuestionCount(grade)
             val levels = when (grade) {
                 in 1..5 -> List(5) { CognitiveLevel.RECALL } +
@@ -756,6 +782,20 @@ class AIService {
         in 1..5 -> 10
         in 6..9 -> 16
         else -> 22
+    }
+
+    private fun subjectQuestionCount(grade: Int): Int = when (grade) {
+        in 1..5 -> 10
+        in 6..9 -> 16
+        in 10..12 -> 22
+        else -> 3
+    }
+
+    private fun expectedQuestionCount(grade: Int, subject: String): Int = when {
+        isSexEducation(subject) -> 3
+        subject.contains("toán", ignoreCase = true) || subject.contains("math", ignoreCase = true) -> mathQuestionCount(grade)
+        LocalSubjectAssignmentGenerator.supports(subject) -> subjectQuestionCount(grade)
+        else -> 3
     }
 
     private fun mathQuestionPoints(grade: Int, questionId: Int): Double = when (grade) {
@@ -909,8 +949,13 @@ class AIService {
             )
         val isMathSubject = subject.contains("toán", ignoreCase = true) ||
                 subject.contains("math", ignoreCase = true)
-        val questionCount = if (isMathSubject) mathQuestionCount(grade) else 3
-        val matrixInstructions = if (!isMathSubject) "" else when (grade) {
+        val questionCount = expectedQuestionCount(grade, subject)
+        val subjectMatrix = SubjectAssessmentMatrix.forSubject(subject, grade)
+        val matrixInstructions = if (!isMathSubject && subjectMatrix != null) {
+            "PHÂN BỔ MẠCH NỘI DUNG CỦA ỨNG DỤNG (mục tiêu lấy mẫu, không phải tỷ lệ bắt buộc của Bộ): " +
+                    subjectMatrix.strands.joinToString("; ") { "${it.topic} ${it.weight}%" } +
+                    ". Mục tiêu mức độ: nhận biết 25%, thông hiểu 35%, vận dụng 30%, vận dụng cao 10%."
+        } else if (!isMathSubject) "" else when (grade) {
             in 1..5 -> """
                 MA TRẬN TOÁN TIỂU HỌC: 10 câu, tổng 10 điểm. Câu 1-8 thuộc Số học và phép tính (8 điểm), câu 9-10 thuộc Hình học và đo lường (2 điểm). Mức độ: câu 1-5 Mức 1, câu 6-9 Mức 2, câu 10 Mức 3. Cả 10 câu là trắc nghiệm 4 lựa chọn; mỗi câu 1 điểm.
             """.trimIndent()
@@ -938,7 +983,7 @@ class AIService {
                 isTrueFalse -> "TRUE_FALSE_SET"
                 else -> "NUMBER"
             }
-            val points = if (isMathSubject) mathQuestionPoints(grade, id) else if (id == questionCount) 4.0 else 3.0
+            val points = if (isMathSubject) mathQuestionPoints(grade, id) else 10.0 / questionCount
             val mathSpec = if (isMathSubject) "\"mathAnswerSpec\":{\"kind\":\"$mathKind\"}" else "\"mathAnswerSpec\":null"
             val optionsExample = if (isChoice) "[\"Lựa chọn A\",\"Lựa chọn B\",\"Lựa chọn C\",\"Lựa chọn D\"]" else "[]"
             val statementsExample = if (isTrueFalse) "[\"Mệnh đề a\",\"Mệnh đề b\",\"Mệnh đề c\",\"Mệnh đề d\"]" else "[]"
@@ -1007,6 +1052,8 @@ class AIService {
         - SPEECH_TO_TEXT
 
         Nếu môn là Toán, số câu, chủ đề, dạng câu và điểm phải theo MA TRẬN TOÁN.
+        Với môn không phải Toán, tuyệt đối không gán gradingSpec.mathAnswerSpec; để null hoặc bỏ trường này.
+        Với môn có ngân hàng chấm cục bộ, số câu phải theo ma trận ứng dụng: lớp 1-5 có 10 câu, lớp 6-9 có 16 câu, lớp 10-12 có 22 câu. Tổng điểm vẫn là 10.
         Với câu trắc nghiệm, thêm "options" là mảng đúng 4 nội dung lựa chọn,
         cả 4 phải khác nhau, cụ thể, không để trống, không dùng văn bản mẫu/placeholder;
         không tự thêm chữ A./B. vào nội dung; answerKey.answer và
@@ -2292,7 +2339,7 @@ $learningStepContext
             errors += "Assignment title is too short"
         }
 
-        val expectedQuestionCount = if (isMathSubject) mathQuestionCount(grade) else 3
+        val expectedQuestionCount = expectedQuestionCount(grade, subject)
         if (assignment.questions.size != expectedQuestionCount) {
             errors += "Assignment must have exactly $expectedQuestionCount questions"
         }
@@ -2987,18 +3034,22 @@ $learningStepContext
 
         val isMathSubject = subject.contains("toán", ignoreCase = true) ||
                 subject.contains("math", ignoreCase = true)
-        val expectedQuestionCount = if (isMathSubject) mathQuestionCount(grade) else 3
+        val expectedQuestionCount = expectedQuestionCount(grade, subject)
         val cognitiveReview = if (isMathSubject) {
             "Kiểm tra đủ $expectedQuestionCount câu và phân bố mức độ theo blueprint/ma trận; không yêu cầu chỉ 3 câu."
         } else {
-            "Q1 nền tảng, Q2 vận dụng, Q3 suy luận/phân tích. Nếu cả 3 câu chỉ cùng một thao tác thì FAIL."
+            "Kiểm tra đủ $expectedQuestionCount câu theo blueprint; phải có tiến triển nhận thức, không lặp một thao tác và không ép về 3 câu nếu blueprint quy định nhiều hơn."
         }
         val pedagogyReview = if (isMathSubject) {
             "Toàn bộ câu hỏi phải tuân thủ ma trận theo lớp, dạng câu, điểm và phạm vi kiến thức."
         } else {
-            "Không được tạo ba câu chỉ để đủ số lượng. Ba câu phải tạo progression Q1 hiểu nền tảng, Q2 vận dụng, Q3 suy luận/phân tích."
+            "Toàn bộ câu hỏi phải bám kỹ năng của step hiện tại, phù hợp lớp, đa dạng thao tác và tuân thủ blueprint của môn."
         }
-        val matrixReview = if (!isMathSubject) "" else when (grade) {
+        val matrixReview = if (!isMathSubject) {
+            SubjectAssessmentMatrix.forSubject(subject, grade)?.let { matrix ->
+                "Mạch nội dung lấy mẫu: ${matrix.strands.joinToString("; ") { "${it.topic} ${it.weight}%" }}. Đây là mục tiêu phân bổ của ứng dụng, không phải tỷ lệ do Bộ quy định."
+            }.orEmpty()
+        } else when (grade) {
             in 1..5 -> "10 câu; ID 1-8 số học, 9-10 hình học; cả 10 câu bốn lựa chọn, 1 điểm/câu."
             in 6..9 -> "16 câu; ID 1-9 đại số, 10-14 hình học, 15-16 thống kê/xác suất; ID 1-11 có 4 lựa chọn; điểm phải theo ma trận 0.5/1.0/0.6/0.75."
             else -> "22 câu; ID 1-12 có 4 lựa chọn; ID 13-16 có 4 mệnh đề đúng/sai và tính điểm theo tỉ lệ; ID 17-22 trả lời ngắn; điểm 0.25/1/0.5 theo phần."
@@ -3181,8 +3232,8 @@ Nếu có LearningStep hiện tại:
 
 Đặc biệt:
 
-Cognitive progression Q1 → Q2 → Q3 phải xảy ra
-BÊN TRONG SKILL HIỆN TẠI.
+Cognitive progression qua toàn bộ câu hỏi phải xảy ra
+BÊN TRONG SKILL HIỆN TẠI; không giới hạn blueprint ở ba câu.
 
 Ví dụ:
 
