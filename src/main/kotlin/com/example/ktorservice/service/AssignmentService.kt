@@ -854,7 +854,11 @@ class AssignmentService(
     ): Double? = withContext(Dispatchers.IO) {
         transaction {
             val recentPercents = UserAssignmentsTable
-                .innerJoin(AssignmentsTable)
+                .innerJoin(
+                    AssignmentsTable,
+                    { UserAssignmentsTable.assignmentId },
+                    { AssignmentsTable.id }
+                )
                 .select(
                     UserAssignmentsTable.score,
                     UserAssignmentsTable.completedAt,
