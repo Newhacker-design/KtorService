@@ -48,6 +48,10 @@ object UserAssignmentsTable : Table("user_assignments") {
         varchar("mode", 20)
             .default("PRACTICE")
 
+    val scoreCoefficient =
+        double("score_coefficient")
+            .default(1.0)
+
     override val primaryKey =
         PrimaryKey(id)
 

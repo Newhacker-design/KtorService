@@ -182,7 +182,10 @@ data class RaceTopSubjectResult(
     val userAssignmentId: Int,
     val status: String,
     val score: Double? = null,
-    val possibleScore: Double
+    val possibleScore: Double,
+    val scoreCoefficient: Double = 1.0,
+    val weightedScore: Double? = null,
+    val weightedPossibleScore: Double? = null
 )
 
 @Serializable
@@ -197,6 +200,37 @@ data class RaceTopStartResponse(
     val previousWeakSubjects: List<String> = emptyList(),
     val previousAverageSubjects: List<String> = emptyList(),
     val previousStrongSubjects: List<String> = emptyList(),
+    val level: Int = 1,
+    val masteredSubjects: Int = 0,
+    val totalSubjects: Int = 7,
+    val scoreCoefficient: Double = 1.0,
+    val message: String? = null
+)
+
+@Serializable
+data class AssignmentCompletionStatusResponse(
+    val success: Boolean,
+    val shouldUnlock: Boolean = false,
+    val unfinishedCount: Long = 0,
+    val completedTodayCount: Long = 0,
+    val message: String? = null
+)
+
+@Serializable
+data class RaceTopPoolGenerateRequest(
+    val grade: Int,
+    val learningStepId: Int
+)
+
+@Serializable
+data class RaceTopPoolGenerateResponse(
+    val success: Boolean,
+    val assignmentId: Int? = null,
+    val grade: Int? = null,
+    val subject: String? = null,
+    val learningStepId: Int? = null,
+    val stepOrder: Int? = null,
+    val title: String? = null,
     val message: String? = null
 )
 

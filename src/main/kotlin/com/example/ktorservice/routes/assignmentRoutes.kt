@@ -13,6 +13,9 @@ import com.example.ktorservice.model.TopStudentResponse
 import com.example.ktorservice.model.TopStudentsResponse
 import com.example.ktorservice.model.RaceTopStartResponse
 import com.example.ktorservice.model.RaceTopSubjectResult
+import com.example.ktorservice.model.AssignmentCompletionStatusResponse
+import com.example.ktorservice.model.RaceTopPoolGenerateRequest
+import com.example.ktorservice.model.RaceTopPoolGenerateResponse
 import com.example.ktorservice.model.UserAssignmentResponse
 import com.example.ktorservice.security.requireUserId
 import com.example.ktorservice.service.AIService
@@ -31,6 +34,64 @@ fun Route.assignmentRoutes(
     assignmentService: AssignmentService,
     parentChildService: ParentChildService
 ) {
+    post("/admin/race-top-pool/generate") {
+        val userId = call.requireUserId(authService)
+        if (userId == null) {
+            call.respond(HttpStatusCode.Unauthorized, RaceTopPoolGenerateResponse(false, message = "Authentication required"))
+            return@post
+        }
+        if (authService.getUserRole(userId)?.uppercase() != ParentChildService.ROLE_ADMIN) {
+            call.respond(HttpStatusCode.Forbidden, RaceTopPoolGenerateResponse(false, message = "Only ADMIN can generate race-top pool assignments"))
+            return@post
+        }
+        try {
+            val request = call.receive<RaceTopPoolGenerateRequest>()
+            val result = assignmentService.generateRaceTopPoolAssignment(request.grade, request.learningStepId)
+            call.respond(HttpStatusCode.OK, RaceTopPoolGenerateResponse(
+                success = true,
+                assignmentId = result.assignmentId,
+                grade = result.grade,
+                subject = result.subject,
+                learningStepId = result.learningStepId,
+                stepOrder = result.stepOrder,
+                title = result.title
+            ))
+        } catch (e: IllegalArgumentException) {
+            call.respond(HttpStatusCode.BadRequest, RaceTopPoolGenerateResponse(false, message = e.message))
+        } catch (e: Exception) {
+            call.respond(HttpStatusCode.InternalServerError, RaceTopPoolGenerateResponse(false, message = e.message ?: "Could not generate assignment"))
+        }
+    }
+
+    get("/assignments/completion-status") {
+        try {
+            val userId = call.requireUserId(authService)
+            if (userId == null) {
+                call.respond(HttpStatusCode.Unauthorized, AssignmentCompletionStatusResponse(false, message = "Authentication required"))
+                return@get
+            }
+            if (authService.getUserRole(userId)?.uppercase() != ParentChildService.ROLE_CHILD) {
+                call.respond(HttpStatusCode.Forbidden, AssignmentCompletionStatusResponse(false, message = "Only a student can request their completion status"))
+                return@get
+            }
+            val dayStart = call.request.queryParameters["dayStart"]?.toLongOrNull()
+            val nextDayStart = call.request.queryParameters["nextDayStart"]?.toLongOrNull()
+            if (dayStart == null || nextDayStart == null || nextDayStart <= dayStart || nextDayStart - dayStart > 36L * 60 * 60 * 1000) {
+                call.respond(HttpStatusCode.BadRequest, AssignmentCompletionStatusResponse(false, message = "Invalid day range"))
+                return@get
+            }
+            val status = assignmentService.getAssignmentCompletionStatus(userId, dayStart, nextDayStart)
+            call.respond(HttpStatusCode.OK, AssignmentCompletionStatusResponse(
+                success = true,
+                shouldUnlock = status.shouldUnlock,
+                unfinishedCount = status.unfinishedCount,
+                completedTodayCount = status.completedTodayCount
+            ))
+        } catch (e: Exception) {
+            call.respond(HttpStatusCode.InternalServerError, AssignmentCompletionStatusResponse(false, message = e.message ?: "Could not read assignment completion status"))
+        }
+    }
+
     post("/assignments/race-top") {
         try {
             val parentId = call.requireUserId(authService)
@@ -68,7 +129,10 @@ fun Route.assignmentRoutes(
                     userAssignmentId = item.id,
                     status = item.status,
                     score = item.score,
-                    possibleScore = item.assignment.totalScore
+                    possibleScore = item.assignment.totalScore,
+                    scoreCoefficient = item.scoreCoefficient,
+                    weightedScore = item.score?.times(item.scoreCoefficient),
+                    weightedPossibleScore = item.assignment.totalScore * item.scoreCoefficient
                 ) },
                 complete = set.complete,
                 weakSubjects = set.weakSubjects,
@@ -77,6 +141,10 @@ fun Route.assignmentRoutes(
                 previousWeakSubjects = set.previousWeakSubjects,
                 previousAverageSubjects = set.previousAverageSubjects,
                 previousStrongSubjects = set.previousStrongSubjects,
+                level = set.level,
+                masteredSubjects = set.masteredSubjects,
+                totalSubjects = set.totalSubjects,
+                scoreCoefficient = set.scoreCoefficient,
                 message = if (set.complete) "Round complete" else "All subjects in this round have been assigned"
             ))
         } catch (e: IllegalArgumentException) {

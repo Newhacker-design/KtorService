@@ -3,6 +3,8 @@ package com.example.ktorservice.service
 import com.example.ktorservice.database.UsersTable
 import com.example.ktorservice.database.table.AssignmentsTable
 import com.example.ktorservice.database.table.UserAssignmentsTable
+import com.example.ktorservice.database.table.LearningPathsTable
+import com.example.ktorservice.database.table.LearningStepsTable
 import com.example.ktorservice.database.table.RaceTopSessionsTable
 import com.example.ktorservice.database.table.RaceTopSessionAssignmentsTable
 import com.example.ktorservice.model.AssignmentMode
@@ -48,14 +50,220 @@ class AssignmentService(
         val strongSubjects: List<String>,
         val previousWeakSubjects: List<String>,
         val previousAverageSubjects: List<String>,
-        val previousStrongSubjects: List<String>
+        val previousStrongSubjects: List<String>,
+        val level: Int,
+        val masteredSubjects: Int,
+        val totalSubjects: Int,
+        val scoreCoefficient: Double
     )
+
+    data class AssignmentCompletionStatus(
+        val unfinishedCount: Long,
+        val completedTodayCount: Long
+    ) {
+        val shouldUnlock: Boolean
+            get() = unfinishedCount == 0L && completedTodayCount > 0L
+    }
+
+    data class RaceTopPoolAssignmentResult(
+        val assignmentId: Int,
+        val grade: Int,
+        val subject: String,
+        val learningStepId: Int,
+        val stepOrder: Int,
+        val title: String
+    )
+
+    private data class RaceTopPoolStepContext(
+        val stepOrder: Int,
+        val title: String,
+        val skill: String,
+        val description: String,
+        val subject: String
+    )
+
+    suspend fun generateRaceTopPoolAssignment(
+        grade: Int,
+        learningStepId: Int
+    ): RaceTopPoolAssignmentResult {
+        require(grade in 1..12) { "Invalid grade" }
+        val step = withContext(Dispatchers.IO) {
+            transaction {
+                (LearningStepsTable innerJoin LearningPathsTable)
+                    .selectAll()
+                    .where {
+                        (LearningStepsTable.id eq learningStepId) and
+                            (LearningPathsTable.grade eq grade)
+                    }
+                    .singleOrNull()
+                    ?.let { row ->
+                        RaceTopPoolStepContext(
+                            stepOrder = row[LearningStepsTable.stepOrder],
+                            title = row[LearningStepsTable.title],
+                            skill = row[LearningStepsTable.skill],
+                            description = row[LearningStepsTable.description].orEmpty(),
+                            subject = row[LearningPathsTable.subject]
+                        )
+                    }
+            }
+        } ?: error("Learning step $learningStepId does not belong to grade $grade")
+        val subject = step.subject
+        val stepOrder = step.stepOrder
+        val stepTitle = step.title
+        val stepSkill = step.skill
+        val stepDescription = step.description
+        val previous = withContext(Dispatchers.IO) {
+            transaction {
+                AssignmentsTable.selectAll().where {
+                    (AssignmentsTable.grade eq grade) and
+                        (AssignmentsTable.subject.lowerCase() eq subject.lowercase()) and
+                        (AssignmentsTable.learningStepId eq learningStepId)
+                }.orderBy(AssignmentsTable.id to SortOrder.DESC).limit(12)
+                    .map { it[AssignmentsTable.content] }
+            }
+        }
+        var lastErrors = emptyList<String>()
+        var accepted: AIService.GeneratedAssignment? = null
+        for (attempt in 1..MAX_ASSIGNMENT_GENERATION_ATTEMPTS) {
+            val candidate = aiSemaphore.withPermit {
+                aiService.generateAssignment(
+                    grade = grade,
+                    subject = subject,
+                    topic = null,
+                    difficulty = AIService.Difficulty.MEDIUM,
+                    previousAssignments = previous + listOfNotNull(accepted?.let(::buildAssignmentContent)),
+                    qualityFeedback = lastErrors.joinToString("\n").ifBlank { null },
+                    learningStepTitle = stepTitle,
+                    learningStepSkill = stepSkill,
+                    learningStepDescription = stepDescription
+                )
+            }
+            val validation = AssignmentValidator.validate(
+                title = candidate.title,
+                questions = candidate.questions,
+                answerKey = candidate.answerKey,
+                gradingGuide = candidate.gradingGuide,
+                totalScore = candidate.totalScore,
+                learningMaterial = candidate.learningMaterial,
+                grade = grade,
+                subject = subject
+            )
+            if (!validation.valid) {
+                lastErrors = validation.errors
+                if (attempt == MAX_ASSIGNMENT_GENERATION_ATTEMPTS) error(validation.errors.joinToString("; "))
+                continue
+            }
+            val draftContent = buildAssignmentContent(candidate)
+            if (previous.any { prior -> assignmentSimilarity(draftContent, prior) >= 0.88 }) {
+                lastErrors = listOf("Bài tạo bị trùng hoặc quá giống bài đã có trong kho cho step này")
+                if (attempt == MAX_ASSIGNMENT_GENERATION_ATTEMPTS) error(lastErrors.single())
+                continue
+            }
+            val review = aiSemaphore.withPermit {
+                aiService.reviewGeneratedAssignment(
+                    assignment = candidate,
+                    grade = grade,
+                    subject = subject,
+                    topic = null,
+                    difficulty = AIService.Difficulty.MEDIUM,
+                    learningStepTitle = stepTitle,
+                    learningStepSkill = stepSkill,
+                    learningStepDescription = stepDescription
+                )
+            }
+            if (!review.pass) {
+                lastErrors = review.issues.ifEmpty { listOf(review.summary) }
+                if (attempt == MAX_ASSIGNMENT_GENERATION_ATTEMPTS) error(lastErrors.joinToString("; "))
+                continue
+            }
+            accepted = candidate
+            break
+        }
+        val final = accepted ?: error("Could not generate a valid non-duplicate assignment")
+        val content = buildAssignmentContent(final)
+        val answerById = final.answerKey.associateBy { it.id }
+        val metadata = json.encodeToString(final.questions.map { question ->
+            QuestionMetadata(
+                id = question.id,
+                question = question.question,
+                learningObjective = question.learningObjective,
+                points = question.points,
+                answerType = question.answerType,
+                gradingMethod = question.gradingMethod,
+                sourceType = question.sourceType,
+                options = question.options,
+                statements = question.statements,
+                gradingSpec = question.gradingSpec.copy(
+                    correctAnswer = answerById[question.id]?.answer
+                        ?: error("Missing answer for question ${question.id}")
+                )
+            )
+        })
+        val answerKey = final.answerKey.joinToString("\n\n") { "Câu ${it.id}:\n${it.answer}" }
+        val id = withContext(Dispatchers.IO) {
+            transaction {
+                AssignmentsTable.insert {
+                    it[AssignmentsTable.grade] = grade
+                    it[AssignmentsTable.subject] = subject
+                    it[AssignmentsTable.topic] = null
+                    it[AssignmentsTable.difficulty] = AIService.Difficulty.MEDIUM.name
+                    it[AssignmentsTable.title] = final.title
+                    it[AssignmentsTable.content] = content
+                    it[AssignmentsTable.answerKey] = answerKey
+                    it[AssignmentsTable.gradingGuide] = final.gradingGuide
+                    it[AssignmentsTable.totalScore] = final.totalScore
+                    it[AssignmentsTable.questionMetadata] = metadata
+                    it[AssignmentsTable.learningStepId] = learningStepId
+                    it[AssignmentsTable.raceTopPool] = true
+                    it[AssignmentsTable.createdAt] = System.currentTimeMillis()
+                }[AssignmentsTable.id]
+            }
+        }
+        return RaceTopPoolAssignmentResult(id, grade, subject, learningStepId, stepOrder, final.title)
+    }
+
+    private fun assignmentSimilarity(first: String, second: String): Double {
+        fun tokens(value: String): Set<String> = value
+            .substringAfter("=== CÂU HỎI ===", value)
+            .lowercase()
+            .split(Regex("[^\\p{L}\\p{N}]+"))
+            .filter { it.length > 1 }
+            .toSet()
+        val a = tokens(first)
+        val b = tokens(second)
+        if (a.isEmpty() || b.isEmpty()) return 0.0
+        return a.intersect(b).size.toDouble() / a.union(b).size.toDouble()
+    }
+
+    suspend fun getAssignmentCompletionStatus(
+        userId: Int,
+        dayStartMillis: Long,
+        nextDayStartMillis: Long
+    ): AssignmentCompletionStatus = withContext(Dispatchers.IO) {
+        transaction {
+            val unfinished = UserAssignmentsTable.selectAll().where {
+                (UserAssignmentsTable.userId eq userId) and
+                    (UserAssignmentsTable.status.upperCase() neq "COMPLETED")
+            }.count()
+            val completedToday = UserAssignmentsTable.selectAll().where {
+                (UserAssignmentsTable.userId eq userId) and
+                    (UserAssignmentsTable.status.upperCase() eq "COMPLETED") and
+                    (UserAssignmentsTable.completedAt greaterEq dayStartMillis) and
+                    (UserAssignmentsTable.completedAt less nextDayStartMillis)
+            }.count()
+            AssignmentCompletionStatus(unfinished, completedToday)
+        }
+    }
 
     /** Creates/resumes one all-subject set. Stored assignments are reused by getNextAssignment. */
     suspend fun createRaceTopSet(userId: Int, grade: Int): RaceTopSetResult =
         raceLocks.computeIfAbsent(userId) { Mutex() }.withLock {
             require(grade in 1..12) { "Invalid grade" }
             val subjects = listOf("math", "literature", "english", "physics", "chemistry", "biology", "giao_duc_gioi_tinh")
+            subjects.forEach { subject ->
+                learningPathService.getNextRaceTopStep(userId, grade, subject)
+                    ?: error("Đua Top cần learning path và step cho môn $subject, lớp $grade.")
+            }
             val previousGroups = withContext(Dispatchers.IO) {
                 transaction {
                     val latest = RaceTopSessionsTable.selectAll().where {
@@ -136,6 +344,7 @@ class AssignmentService(
                 if (item.status != "COMPLETED" || score == null || total <= 0.0) null
                 else item.assignment.subject to (score / total * 100.0)
             }
+            val levelStatus = learningPathService.getRaceTopLevelStatus(userId, grade)
             RaceTopSetResult(
                 sessionId!!, assignments, complete,
                 grouped.filter { it.second < 60.0 }.map { it.first },
@@ -143,7 +352,11 @@ class AssignmentService(
                 grouped.filter { it.second >= 80.0 }.map { it.first },
                 previousGroups?.getOrNull(0).orEmpty(),
                 previousGroups?.getOrNull(1).orEmpty(),
-                previousGroups?.getOrNull(2).orEmpty()
+                previousGroups?.getOrNull(2).orEmpty(),
+                levelStatus.level,
+                levelStatus.masteredSubjects,
+                levelStatus.totalSubjects,
+                levelStatus.scoreCoefficient
             )
         }
 
@@ -174,7 +387,8 @@ class AssignmentService(
                         )
                         .select(
                             UserAssignmentsTable.userId,
-                            UserAssignmentsTable.score
+                            UserAssignmentsTable.score,
+                            UserAssignmentsTable.scoreCoefficient
                         )
                         .where {
                             (UserAssignmentsTable.status eq "COMPLETED") and
@@ -193,9 +407,10 @@ class AssignmentService(
                     val score =
                         row[UserAssignmentsTable.score]
                             ?: 0.0
+                    val coefficient = row[UserAssignmentsTable.scoreCoefficient]
 
                     scoreMap[userId] =
-                        (scoreMap[userId] ?: 0.0) + score
+                        (scoreMap[userId] ?: 0.0) + score * coefficient
                 }
 
                 scoreMap.entries
@@ -251,12 +466,10 @@ class AssignmentService(
         require(subject.isNotBlank()) {
             "Subject is required"
         }
-        val nextLearningStep =
-            learningPathService.getNextStep(
-                userId = userId,
-                grade = grade,
-                subject = subject
-            )
+        val nextLearningStep = when (mode) {
+            AssignmentMode.PRACTICE -> learningPathService.getNextStep(userId, grade, subject)
+            AssignmentMode.RACE_TOP -> learningPathService.getNextRaceTopStep(userId, grade, subject)
+        }
         val recentRacePercent =
             nextLearningStep?.second?.let { progress ->
                 if (progress.attemptCount == 0) null else progress.lastScore
@@ -363,6 +576,19 @@ class AssignmentService(
                             "step=$learningStepId"
                 )
                 return activeAssignment
+            }
+        }
+
+        if (mode == AssignmentMode.RACE_TOP && learningStepId != null) {
+            val pooled = findRaceTopPoolAssignment(userId, grade, subject, learningStepId)
+            if (pooled != null) {
+                println("RACE TOP PREGENERATED POOL HIT: assignment=${pooled.id} step=$learningStepId")
+                return createUserAssignmentImmediately(
+                    userId = userId,
+                    assignment = pooled,
+                    learningStepId = learningStepId,
+                    mode = mode
+                )
             }
         }
 
@@ -866,7 +1092,13 @@ class AssignmentService(
                         }
                         .firstOrNull()
 
-                if (existing != null) {
+                val canRepeatRacePoolAssignment =
+                    existing != null &&
+                        mode == AssignmentMode.RACE_TOP &&
+                        assignment.raceTopPool &&
+                        existing[UserAssignmentsTable.status].equals("COMPLETED", ignoreCase = true)
+
+                if (existing != null && !canRepeatRacePoolAssignment) {
 
                     println(
                         "USER ASSIGNMENT ALREADY EXISTS: " +
@@ -909,6 +1141,12 @@ class AssignmentService(
                         assignment
                     )
                 }
+                val coefficient = if (mode == AssignmentMode.RACE_TOP && learningStepId != null) {
+                    val stepOrder = LearningStepsTable.selectAll()
+                        .where { LearningStepsTable.id eq learningStepId }
+                        .single()[LearningStepsTable.stepOrder]
+                    1.0 + (stepOrder - 1) * 0.1
+                } else 1.0
                 val statement =
                     UserAssignmentsTable.insert {
 
@@ -926,6 +1164,8 @@ class AssignmentService(
 
                         it[UserAssignmentsTable.mode] =
                             mode.name
+
+                        it[UserAssignmentsTable.scoreCoefficient] = coefficient
                     }
 
                 val userAssignmentId =
@@ -952,7 +1192,8 @@ class AssignmentService(
                     assignment = assignment,
                     questionMetadata =
                         assignment.questionMetadata,
-                    mode = mode
+                    mode = mode,
+                    scoreCoefficient = coefficient
                 )
             }
         }
@@ -1106,6 +1347,37 @@ class AssignmentService(
                         rowToResult(it)
                     }
             }
+        }
+    }
+
+    private suspend fun findRaceTopPoolAssignment(
+        userId: Int,
+        grade: Int,
+        subject: String,
+        learningStepId: Int
+    ): AssignmentResult? = withContext(Dispatchers.IO) {
+        transaction {
+            val pool = AssignmentsTable.selectAll().where {
+                (AssignmentsTable.grade eq grade) and
+                    (AssignmentsTable.subject.lowerCase() eq subject.trim().lowercase()) and
+                    (AssignmentsTable.learningStepId eq learningStepId) and
+                    (AssignmentsTable.raceTopPool eq true)
+            }.orderBy(AssignmentsTable.id to SortOrder.ASC).toList()
+            if (pool.isEmpty()) return@transaction null
+
+            val attempts = UserAssignmentsTable.selectAll().where {
+                (UserAssignmentsTable.userId eq userId) and
+                    (UserAssignmentsTable.mode eq AssignmentMode.RACE_TOP.name) and
+                    (UserAssignmentsTable.assignmentId inList pool.map { it[AssignmentsTable.id] })
+            }.orderBy(UserAssignmentsTable.id to SortOrder.DESC).toList()
+            val usedIds = attempts.map { it[UserAssignmentsTable.assignmentId] }.toSet()
+            val nextUnused = pool.firstOrNull { it[AssignmentsTable.id] !in usedIds }
+            val chosen = nextUnused ?: run {
+                val lastAssignmentId = attempts.firstOrNull()?.get(UserAssignmentsTable.assignmentId)
+                val lastIndex = pool.indexOfFirst { it[AssignmentsTable.id] == lastAssignmentId }
+                pool[(lastIndex + 1).mod(pool.size)]
+            }
+            rowToResult(chosen)
         }
     }
 
@@ -1578,7 +1850,8 @@ class AssignmentService(
             learningPathService.updateProgress(
                 userId = userId,
                 stepId = learningStepId,
-                score = scorePercent
+                score = scorePercent,
+                preserveMastery = userAssignment.mode == AssignmentMode.RACE_TOP
             )
 
             println(
@@ -1969,7 +2242,8 @@ class AssignmentService(
                 difficulty,
 
             questionMetadata =
-                questionMetadata
+                questionMetadata,
+            raceTopPool = row[AssignmentsTable.raceTopPool]
         )
     }
 
@@ -2001,6 +2275,8 @@ class AssignmentService(
                 runCatching {
                     AssignmentMode.valueOf(row[UserAssignmentsTable.mode])
                 }.getOrDefault(AssignmentMode.PRACTICE),
+
+            scoreCoefficient = row[UserAssignmentsTable.scoreCoefficient],
 
             status =
                 row[UserAssignmentsTable.status],
@@ -2059,7 +2335,9 @@ class AssignmentService(
         val difficulty: AIService.Difficulty,
 
         val questionMetadata: List<QuestionMetadata> =
-            emptyList()
+            emptyList(),
+
+        val raceTopPool: Boolean = false
     )
 
 
@@ -2081,7 +2359,8 @@ class AssignmentService(
         val assignment: AssignmentResult,
         val questionMetadata: List<QuestionMetadata>,
         val learningStepId: Int? = null,
-        val mode: AssignmentMode = AssignmentMode.PRACTICE
+        val mode: AssignmentMode = AssignmentMode.PRACTICE,
+        val scoreCoefficient: Double = 1.0
     )
 
 

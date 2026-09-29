@@ -11,6 +11,36 @@ import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.transactions.transaction
 
 class LearningPathService {
+    data class RaceTopLevelStatus(val level: Int, val masteredSubjects: Int, val totalSubjects: Int) {
+        val scoreCoefficient: Double get() = 1.0 + (level - 1) * 0.1
+    }
+
+    /** Synchronized level shown to the student, based on mastery across all seven subjects. */
+    fun getRaceTopLevelStatus(userId: Int, grade: Int): RaceTopLevelStatus = transaction {
+        val subjects = listOf("MATH", "LITERATURE", "ENGLISH", "PHYSICS", "CHEMISTRY", "BIOLOGY", "GIAO_DUC_GIOI_TINH")
+        val paths = LearningPathsTable.selectAll().where { LearningPathsTable.grade eq grade }
+            .associateBy { it[LearningPathsTable.subject].trim().uppercase(java.util.Locale.ROOT) }
+        require(subjects.all(paths::containsKey)) { "Đua Top cần learning path cho đủ 7 môn, lớp $grade." }
+        val steps = subjects.associateWith { subject ->
+            LearningStepsTable.selectAll().where { LearningStepsTable.pathId eq paths.getValue(subject)[LearningPathsTable.id] }
+                .orderBy(LearningStepsTable.stepOrder to SortOrder.ASC).map { it.toLearningStep() }
+        }
+        val commonOrders = steps.values.map { it.map(LearningStep::stepOrder).toSet() }
+            .reduce { common, current -> common.intersect(current) }.sorted()
+        require(commonOrders.isNotEmpty()) { "Learning path của 7 môn chưa có step đồng bộ." }
+        val activeOrder = commonOrders.firstOrNull { order ->
+            subjects.any { subject ->
+                val step = steps.getValue(subject).first { it.stepOrder == order }
+                getOrCreateProgress(userId, step.id).status != LearningProgressStatus.MASTERED
+            }
+        } ?: commonOrders.last()
+        val mastered = subjects.count { subject ->
+            val step = steps.getValue(subject).first { it.stepOrder == activeOrder }
+            getOrCreateProgress(userId, step.id).status == LearningProgressStatus.MASTERED
+        }
+        RaceTopLevelStatus(activeOrder, mastered, subjects.size)
+    }
+
     private fun normalizeSubject(subject: String): String =
         subject.trim().uppercase(java.util.Locale.ROOT)
 
@@ -251,6 +281,56 @@ class LearningPathService {
         }
     }
 
+    /** Returns the student's current synchronized race-top step for a subject. */
+    fun getNextRaceTopStep(
+        userId: Int,
+        grade: Int,
+        subject: String
+    ): Pair<LearningStep, StudentLearningProgress>? = transaction {
+        val raceSubjects = listOf(
+            "MATH", "LITERATURE", "ENGLISH", "PHYSICS", "CHEMISTRY", "BIOLOGY", "GIAO_DUC_GIOI_TINH"
+        )
+        val paths = LearningPathsTable.selectAll().where { LearningPathsTable.grade eq grade }
+            .orderBy(LearningPathsTable.id to SortOrder.ASC)
+            .associateBy { it[LearningPathsTable.subject].trim().uppercase(java.util.Locale.ROOT) }
+        val missingPaths = raceSubjects.filterNot(paths::containsKey)
+        require(missingPaths.isEmpty()) {
+            "Đua Top lớp $grade cần learning path cho đủ 7 môn. Thiếu: ${missingPaths.joinToString()}."
+        }
+        val stepsBySubject = raceSubjects.associateWith { normalized ->
+            val pathId = paths.getValue(normalized)[LearningPathsTable.id]
+            LearningStepsTable.selectAll().where { LearningStepsTable.pathId eq pathId }
+                .orderBy(LearningStepsTable.stepOrder to SortOrder.ASC)
+                .map { it.toLearningStep() }
+        }
+        val availableOrders = stepsBySubject.values.map { list ->
+            list.map { it.stepOrder }.toSet()
+        }.reduce { common, orders -> common.intersect(orders) }.sorted()
+        require(availableOrders.isNotEmpty()) {
+            "Learning path của 7 môn lớp $grade chưa có step đồng bộ."
+        }
+        require(availableOrders == (1..availableOrders.last()).toList()) {
+            "Step của 7 learning path lớp $grade phải liên tục từ step 1 để không bỏ qua nội dung."
+        }
+        val targetSubject = subject.trim().uppercase(java.util.Locale.ROOT)
+        require(targetSubject in raceSubjects) { "Môn $subject không thuộc bộ Đua Top." }
+
+        var activeOrder: Int? = null
+        for (order in availableOrders) {
+            val allMastered = raceSubjects.all { currentSubject ->
+                val step = stepsBySubject.getValue(currentSubject).first { it.stepOrder == order }
+                getOrCreateProgress(userId, step.id).status == LearningProgressStatus.MASTERED
+            }
+            if (!allMastered) {
+                activeOrder = order
+                break
+            }
+        }
+        val chosenOrder = activeOrder ?: availableOrders.last()
+        val chosenStep = stepsBySubject.getValue(targetSubject).first { it.stepOrder == chosenOrder }
+        chosenStep to getOrCreateProgress(userId, chosenStep.id)
+    }
+
     /**
      * Cập nhật progress sau khi học sinh hoàn thành assignment.
      *
@@ -259,7 +339,8 @@ class LearningPathService {
     fun updateProgress(
         userId: Int,
         stepId: Int,
-        score: Double
+        score: Double,
+        preserveMastery: Boolean = false
     ): StudentLearningProgress {
 
         return transaction {
@@ -282,7 +363,7 @@ class LearningPathService {
              * 70% mastery cũ
              * 30% điểm mới.
              */
-            val newMastery =
+            val calculatedMastery =
                 if (current.attemptCount == 0) {
                     safeScore
                 } else {
@@ -290,10 +371,13 @@ class LearningPathService {
                             safeScore * 0.3
                 }
 
-            val newStatus = calculateStatus(
-                masteryScore = newMastery,
-                attemptCount = newAttemptCount
-            )
+            val newMastery = if (preserveMastery && current.status == LearningProgressStatus.MASTERED) {
+                maxOf(current.masteryScore, calculatedMastery)
+            } else calculatedMastery
+
+            val newStatus = if (preserveMastery && current.status == LearningProgressStatus.MASTERED) {
+                LearningProgressStatus.MASTERED
+            } else calculateStatus(masteryScore = newMastery, attemptCount = newAttemptCount)
 
             val now = System.currentTimeMillis()
 

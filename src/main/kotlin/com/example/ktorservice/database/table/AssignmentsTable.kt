@@ -43,6 +43,10 @@ object AssignmentsTable : Table("assignments") {
         integer("learning_step_id")
             .nullable()
 
+    val raceTopPool =
+        bool("race_top_pool")
+            .default(false)
+
     val createdAt =
         long("created_at")
 
