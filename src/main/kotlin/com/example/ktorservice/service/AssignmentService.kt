@@ -205,26 +205,34 @@ class AssignmentService(
         println("TOPIC = $topic")
         println("DIFFICULTY = $difficulty")
 
-        val existingAssignment =
-            if (nextLearningStep == null) {
+        val learningStepId = nextLearningStep?.first?.id
 
-                findNextAvailableAssignment(
+        if (learningStepId != null) {
+            val activeAssignment =
+                findActiveAssignmentForLearningStep(
                     userId = userId,
-                    grade = grade,
-                    subject = subject,
-                    topic = topic,
-                    difficulty = difficulty
+                    learningStepId = learningStepId
                 )
 
-            } else {
-
+            if (activeAssignment != null) {
                 println(
-                    "LEARNING PATH ACTIVE -> " +
-                            "SKIP GENERIC ASSIGNMENT STORAGE"
+                    "REUSING ACTIVE ASSIGNMENT FOR LEARNING STEP: " +
+                            "assignment=${activeAssignment.assignmentId} " +
+                            "step=$learningStepId"
                 )
-
-                null
+                return activeAssignment
             }
+        }
+
+        val existingAssignment =
+            findNextAvailableAssignment(
+                userId = userId,
+                grade = grade,
+                subject = subject,
+                topic = topic,
+                difficulty = difficulty,
+                learningStepId = learningStepId
+            )
 
         if (existingAssignment != null) {
 
@@ -236,7 +244,7 @@ class AssignmentService(
             return createUserAssignmentImmediately(
                 userId = userId,
                 assignment = existingAssignment,
-                learningStepId = null
+                learningStepId = learningStepId
             )
         }
 
@@ -587,6 +595,9 @@ class AssignmentService(
                             it[AssignmentsTable.questionMetadata] =
                                 questionMetadata
 
+                            it[AssignmentsTable.learningStepId] =
+                                learningStepId
+
                             it[AssignmentsTable.createdAt] =
                                 System.currentTimeMillis()
                         }
@@ -769,6 +780,36 @@ class AssignmentService(
         }
     }
 
+    private suspend fun findActiveAssignmentForLearningStep(
+        userId: Int,
+        learningStepId: Int
+    ): UserAssignmentResult? = withContext(Dispatchers.IO) {
+        transaction {
+            val userAssignment = UserAssignmentsTable
+                .selectAll()
+                .where {
+                    (UserAssignmentsTable.userId eq userId) and
+                            (UserAssignmentsTable.learningStepId eq learningStepId)
+                }
+                .firstOrNull {
+                    it[UserAssignmentsTable.status] != "COMPLETED"
+                }
+                ?: return@transaction null
+
+            val assignment = AssignmentsTable
+                .selectAll()
+                .where {
+                    AssignmentsTable.id eq
+                            userAssignment[UserAssignmentsTable.assignmentId]
+                }
+                .firstOrNull()
+                ?.let(::rowToResult)
+                ?: return@transaction null
+
+            rowToUserAssignment(userAssignment, assignment)
+        }
+    }
+
 
     // ============================================================
     // FIND NEXT AVAILABLE ASSIGNMENT
@@ -779,7 +820,8 @@ class AssignmentService(
         grade: Int,
         subject: String,
         topic: String?,
-        difficulty: AIService.Difficulty
+        difficulty: AIService.Difficulty,
+        learningStepId: Int? = null
     ): AssignmentResult? {
 
         return withContext(Dispatchers.IO) {
@@ -791,7 +833,6 @@ class AssignmentService(
                     .where {
 
                         (AssignmentsTable.grade eq grade) and
-                                (AssignmentsTable.subject eq subject) and
                                 (AssignmentsTable.difficulty eq difficulty.name) and
                                 (
                                         if (topic == null) {
@@ -812,6 +853,13 @@ class AssignmentService(
                         val assignmentId =
                             row[AssignmentsTable.id]
 
+                        val matchesSubject =
+                            row[AssignmentsTable.subject].trim()
+                                .equals(subject.trim(), ignoreCase = true)
+
+                        val matchesLearningStep =
+                            row[AssignmentsTable.learningStepId] == learningStepId
+
                         val alreadyAssigned =
                             UserAssignmentsTable
                                 .selectAll()
@@ -825,7 +873,7 @@ class AssignmentService(
                                 }
                                 .count() > 0
 
-                        !alreadyAssigned
+                        matchesSubject && matchesLearningStep && !alreadyAssigned
                     }
                     ?.let {
                         rowToResult(it)

@@ -39,6 +39,10 @@ object AssignmentsTable : Table("assignments") {
         text("question_metadata")
             .nullable()
 
+    val learningStepId =
+        integer("learning_step_id")
+            .nullable()
+
     val createdAt =
         long("created_at")
 

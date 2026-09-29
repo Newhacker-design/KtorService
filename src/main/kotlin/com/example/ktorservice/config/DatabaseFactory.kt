@@ -114,6 +114,27 @@ object DatabaseFactory {
                 // NEW
                 DeviceControlsTable
             )
+
+            // Additive migration for databases created before learning-step pooling.
+            exec(
+                "ALTER TABLE assignments " +
+                        "ADD COLUMN IF NOT EXISTS learning_step_id INTEGER NULL"
+            )
+
+            // Reuse past path-generated assignments when their step association is unambiguous.
+            exec(
+                "UPDATE assignments AS a " +
+                        "SET learning_step_id = linked.learning_step_id " +
+                        "FROM (" +
+                        "SELECT assignment_id, MIN(learning_step_id) AS learning_step_id " +
+                        "FROM user_assignments " +
+                        "WHERE learning_step_id IS NOT NULL " +
+                        "GROUP BY assignment_id " +
+                        "HAVING COUNT(DISTINCT learning_step_id) = 1" +
+                        ") AS linked " +
+                        "WHERE a.id = linked.assignment_id " +
+                        "AND a.learning_step_id IS NULL"
+            )
         }
 
         // Idempotently add baseline math paths for grades 1–12.
