@@ -47,6 +47,10 @@ object AssignmentsTable : Table("assignments") {
         bool("race_top_pool")
             .default(false)
 
+    val active =
+        bool("active")
+            .default(true)
+
     val createdAt =
         long("created_at")
 

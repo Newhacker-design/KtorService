@@ -1404,6 +1404,7 @@ class AssignmentService(
 
                         (AssignmentsTable.grade eq grade) and
                                 (AssignmentsTable.difficulty eq difficulty.name) and
+                                (AssignmentsTable.active eq true) and
                                 (
                                         if (topic == null) {
 
@@ -1470,6 +1471,7 @@ class AssignmentService(
                 (AssignmentsTable.grade eq grade) and
                     (AssignmentsTable.subject.lowerCase() eq subject.trim().lowercase()) and
                     (AssignmentsTable.learningStepId eq learningStepId) and
+                    (AssignmentsTable.active eq true) and
                     (AssignmentsTable.raceTopPool eq true)
             }.orderBy(AssignmentsTable.id to SortOrder.ASC).toList()
             if (pool.isEmpty()) return@transaction null
@@ -2196,6 +2198,7 @@ class AssignmentService(
                 var query =
                     AssignmentsTable
                         .selectAll()
+                        .where { AssignmentsTable.active eq true }
 
                 if (grade != null) {
 

@@ -125,6 +125,7 @@ object DatabaseFactory {
                         "ADD COLUMN IF NOT EXISTS learning_step_id INTEGER NULL"
             )
             exec("ALTER TABLE assignments ADD COLUMN IF NOT EXISTS race_top_pool BOOLEAN NOT NULL DEFAULT FALSE")
+            exec("ALTER TABLE assignments ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE")
             exec(
                 "ALTER TABLE user_assignments " +
                         "ADD COLUMN IF NOT EXISTS mode VARCHAR(20) NOT NULL DEFAULT 'PRACTICE'"
