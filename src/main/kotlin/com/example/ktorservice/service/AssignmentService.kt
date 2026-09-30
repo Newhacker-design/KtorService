@@ -254,6 +254,31 @@ class AssignmentService(
         return a.intersect(b).size.toDouble() / a.union(b).size.toDouble()
     }
 
+    private suspend fun getUserPracticeAssignmentHistory(
+        userId: Int,
+        grade: Int,
+        subject: String
+    ): List<String> = withContext(Dispatchers.IO) {
+        transaction {
+            UserAssignmentsTable
+                .innerJoin(
+                    AssignmentsTable,
+                    { UserAssignmentsTable.assignmentId },
+                    { AssignmentsTable.id }
+                )
+                .select(AssignmentsTable.content)
+                .where {
+                    (UserAssignmentsTable.userId eq userId) and
+                            (UserAssignmentsTable.mode eq AssignmentMode.PRACTICE.name) and
+                            (AssignmentsTable.grade eq grade) and
+                            (AssignmentsTable.subject.lowerCase() eq subject.trim().lowercase())
+                }
+                .orderBy(UserAssignmentsTable.id to SortOrder.DESC)
+                .limit(100)
+                .map { it[AssignmentsTable.content] }
+        }
+    }
+
     suspend fun getAssignmentCompletionStatus(
         userId: Int,
         dayStartMillis: Long,
@@ -639,6 +664,11 @@ class AssignmentService(
             )
         }
 
+        val previousPracticeAssignments = if (mode == AssignmentMode.PRACTICE) {
+            getUserPracticeAssignmentHistory(userId, grade, subject)
+        } else {
+            emptyList()
+        }
         val existingAssignment =
             findNextAvailableAssignment(
                 userId = userId,
@@ -647,7 +677,8 @@ class AssignmentService(
                 topic = topic,
                 difficulty = effectiveDifficulty,
                 learningStepId = learningStepId,
-                mode = mode
+                mode = mode,
+                excludeSimilarTo = previousPracticeAssignments
             )
 
         if (existingAssignment != null) {
@@ -667,9 +698,9 @@ class AssignmentService(
 
         println("NO AVAILABLE ASSIGNMENT IN STORAGE")
         println("ASSIGNMENT STORAGE EMPTY")
-        val useLocalGenerator = LocalSubjectAssignmentGenerator.supports(subject)
+        var useLocalGenerator = LocalSubjectAssignmentGenerator.supports(subject)
         if (useLocalGenerator) {
-            println("Using built-in assignment bank; AI generation and review are disabled for $subject")
+            println("Using built-in assignment bank first; AI is a freshness fallback if it would repeat this student's prior questions")
         } else {
             println("WAITING FOR AI SEMAPHORE...")
         }
@@ -702,8 +733,20 @@ class AssignmentService(
             check(validation.valid) {
                 "Local assignment bank failed validation: ${validation.errors.joinToString("; ")}"
             }
-            generated = candidate
-        } else {
+            val candidateContent = buildAssignmentContent(candidate)
+            if (previousPracticeAssignments.any { previous ->
+                    assignmentSimilarity(candidateContent, previous) >= 0.88
+                }) {
+                println("Local bank candidate repeats previous practice content; generating a fresh assignment")
+                useLocalGenerator = false
+                lastErrors = listOf(
+                    "Bài mới không được lặp lại câu hỏi đã giao trước đây cho học sinh. Hãy tạo nội dung khác."
+                )
+            } else {
+                generated = candidate
+            }
+        }
+        if (!useLocalGenerator) {
         for (attempt in 1..MAX_ASSIGNMENT_GENERATION_ATTEMPTS) {
 
             println(
@@ -738,6 +781,7 @@ class AssignmentService(
                                 subject = subject,
                                 topic = topic,
                                 difficulty = effectiveDifficulty,
+                                previousAssignments = previousPracticeAssignments,
 
                                 qualityFeedback =
                                     lastErrors
@@ -817,6 +861,19 @@ class AssignmentService(
                 println(
                     "✅ ASSIGNMENT VALIDATOR PASSED"
                 )
+
+                val candidateContent = buildAssignmentContent(candidate)
+                if (previousPracticeAssignments.any { previous ->
+                        assignmentSimilarity(candidateContent, previous) >= 0.88
+                    }) {
+                    lastErrors = listOf(
+                        "Bài tạo mới trùng hoặc quá giống đề luyện tập đã giao cho học sinh. Hãy thay đổi ngữ liệu, dữ kiện và câu hỏi."
+                    )
+                    if (attempt == MAX_ASSIGNMENT_GENERATION_ATTEMPTS) {
+                        throw IllegalStateException(lastErrors.single())
+                    }
+                    continue
+                }
 
                 // ------------------------------------------------
                 // AI QUALITY REVIEW
@@ -1333,7 +1390,8 @@ class AssignmentService(
         topic: String?,
         difficulty: AIService.Difficulty,
         learningStepId: Int? = null,
-        mode: AssignmentMode
+        mode: AssignmentMode,
+        excludeSimilarTo: List<String> = emptyList()
     ): AssignmentResult? {
 
         return withContext(Dispatchers.IO) {
@@ -1386,7 +1444,11 @@ class AssignmentService(
                                 }
                                 .count() > 0
 
-                        matchesSubject && matchesLearningStep && !alreadyAssigned &&
+                        val repeatsPreviousContent = excludeSimilarTo.any { previous ->
+                            assignmentSimilarity(row[AssignmentsTable.content], previous) >= 0.88
+                        }
+
+                        matchesSubject && matchesLearningStep && !alreadyAssigned && !repeatsPreviousContent &&
                                 (!LocalSubjectAssignmentGenerator.supports(subject) ||
                                         isLocallyGradable(rowToResult(row)))
                     }
@@ -1427,7 +1489,8 @@ class AssignmentService(
         val supportedMethods = setOf(
             AIService.RuleGradingMethod.EXACT,
             AIService.RuleGradingMethod.NUMERIC,
-            AIService.RuleGradingMethod.REQUIRED_CONCEPTS
+            AIService.RuleGradingMethod.REQUIRED_CONCEPTS,
+            AIService.RuleGradingMethod.STEP_RUBRIC
         )
         return assignment.questionMetadata.isNotEmpty() &&
                 assignment.questionMetadata.all { question ->
@@ -1436,6 +1499,8 @@ class AssignmentService(
                             spec.correctAnswer.isNotBlank() &&
                             (spec.method != AIService.RuleGradingMethod.REQUIRED_CONCEPTS ||
                                     spec.requiredConcepts.isNotEmpty()) &&
+                            (spec.method != AIService.RuleGradingMethod.STEP_RUBRIC ||
+                                    spec.rubric?.criteria?.isNotEmpty() == true) &&
                             (spec.mathAnswerSpec == null ||
                                     (spec.mathAnswerSpec.kind == AIService.MathAnswerKind.TRUE_FALSE_SET &&
                                             question.statements.size == 4 &&
